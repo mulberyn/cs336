@@ -1,15 +1,9 @@
-
 def initialize_vocab(
-    special_tokens: list[str],
+    special_tokens: list[str]
 ) -> dict[int, bytes]:
-    vocab = {}
-    idx = 0
+    """构建初始词汇表：0‑255 为单字节，接着是特殊 token"""
     
-    for byte_value in range(256):
-        vocab[idx] = bytes([byte_value])
-        idx += 1
+    vocab = {i: bytes([i]) for i in range(256)}
     for token in special_tokens:
-        vocab[idx] = token.encode("utf-8")
-        idx += 1
-        
+        vocab[len(vocab)] = token.encode('utf-8')
     return vocab

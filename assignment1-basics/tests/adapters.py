@@ -562,7 +562,7 @@ def get_tokenizer(
     raise NotImplementedError
 
 
-from cs336_basics.tokenizer.train_bpe import train_bpe
+from cs336_basics.tokenizer.train import train_bpe
 
 def run_train_bpe(
     input_path: str | os.PathLike,
