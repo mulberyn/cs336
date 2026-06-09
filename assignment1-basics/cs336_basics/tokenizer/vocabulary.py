@@ -1,9 +1,7 @@
-from cs336_basics.tokenizer.ctypes import Vocabulary
-
 
 def initialize_vocab(
     special_tokens: list[str],
-) -> Vocabulary:
+) -> dict[int, bytes]:
     vocab = {}
     idx = 0
     
