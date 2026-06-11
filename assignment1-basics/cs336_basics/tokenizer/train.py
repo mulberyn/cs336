@@ -12,6 +12,7 @@ def train_bpe(
     # 加载并预分词
     text = load_text(input_path)
     words = pretokenize(text, special_tokens)
+    print(f"Loaded {len(words)} words from {input_path}.")
 
     # 初始化词汇表
     vocab = initialize_vocab(special_tokens)
@@ -24,6 +25,7 @@ def train_bpe(
         seq = tuple(w.encode('utf-8'))
         token_sequences[seq] = token_sequences.get(seq, 0) + 1
 
+    print(f"Initial vocabulary size (excluding special tokens): {len(token_sequences)}")
     # 构建增量数据结构
     words_dict, pair_counts, pair_to_words = build_structures(token_sequences)
 
@@ -32,8 +34,11 @@ def train_bpe(
 
     merges = []
 
+    print(f"Starting BPE training to reach vocab size {vocab_size}...")
+    
     # 训练循环
     while len(vocab) < vocab_size:
+        print(f"Current vocab size: {len(vocab)}. Merges so far: {len(merges)}. Heap size: {len(heap)}.")
         # 从堆中获取当前最佳 pair
         best_pair = pop_best_pair(heap, pair_counts, vocab)
         if best_pair is None:
@@ -63,18 +68,14 @@ def train_bpe(
 
 
 if __name__ == "__main__":
-    from tests.adapters import run_train_bpe
-
-    input_path = "data/sample.txt"
-    vocab, merges = run_train_bpe(
-        input_path=input_path,
-        vocab_size=257 + 12,
-        special_tokens=["<|endoftext|>"],
-    )
-    print("Learned vocab:")
-    for token_id, token_bytes in vocab.items():
-        print(f"{token_id}: {token_bytes}")
-    print("\nLearned merges:")
-    for merge in merges:  
-        print(merge)
+    input_path = "data/TinyStoriesV2-GPT4-train.txt"
     
+    import time
+    start_time = time.time()
+    vocab, merges = train_bpe(
+        input_path = input_path,
+        vocab_size = 10000,
+        special_tokens = ["<|endoftext|>"],
+    )
+    end_time = time.time()
+    print(f"Training completed in {end_time - start_time:.2f} seconds.")
