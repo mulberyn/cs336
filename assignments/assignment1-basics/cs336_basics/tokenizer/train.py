@@ -25,8 +25,11 @@ The pipeline uses two key optimisations for large corpora:
 
 import json
 import mmap
+import multiprocessing as mp
+import os
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import regex as re
@@ -50,6 +53,14 @@ _COMPILED_GPT2 = re.compile(GPT2_PATTERN)
 #: but materialises every match into a list.  The threshold is set conservatively
 #: so the intermediate list stays under roughly 600 MB of resident memory.
 _FINDALL_THRESHOLD_CHARS = 50_000_000  # 50 MB of UTF-8 text
+
+#: Default number of worker processes for parallel pre-tokenization.
+#: Capped at 8 to avoid diminishing returns from IPC overhead.
+_DEFAULT_NUM_WORKERS = min(os.cpu_count() or 4, 8)
+
+#: Minimum text length (characters) to trigger parallel pre-tokenization.
+#: Below this threshold the process-spawn overhead dominates the regex savings.
+_PARALLEL_THRESHOLD_CHARS = 10_000_000  # 10 MB
 
 
 # ===================================================================
@@ -188,6 +199,127 @@ def _count_token_sequences(
 
 
 # ===================================================================
+#  Parallel pre-tokenization (fork + copy-on-write)
+# ===================================================================
+#
+# Sending large text chunks through :mod:`multiprocessing` pipes is slow
+# (macOS pipe buffers are ~16 KB, so a 275 MB chunk needs ~17 000 round-
+# trips).  Instead we store the pre-split chunk list in a module-level
+# variable, fork the process, and pass only integer *indices* through the
+# pool.  The forked children inherit the chunks via copy-on-write.
+
+#: Set to ``True`` when ``fork`` start method is available on this platform.
+_FORK_AVAILABLE = "fork" in mp.get_all_start_methods()
+
+#: Pre-split text chunks, set before forking so children inherit via COW.
+_fork_chunks: list[str] | None = None
+
+
+def _worker_by_index(idx: int) -> Counter[bytes]:
+    """Process the chunk at position *idx* in the module-level ``_fork_chunks``.
+
+    Only the integer *idx* travels through the pool pipe — the chunk text
+    is inherited from the parent via fork copy-on-write.
+
+    Args:
+        idx: Index into ``_fork_chunks``.
+
+    Returns:
+        A :class:`~collections.Counter` of ``{bytes: freq}`` for this chunk.
+    """
+    assert _fork_chunks is not None, "_fork_chunks must be set before forking"
+    chunk_text = _fork_chunks[idx]
+    compiled = re.compile(GPT2_PATTERN)
+
+    if len(chunk_text) < _FINDALL_THRESHOLD_CHARS:
+        return Counter(
+            token.encode("utf-8")
+            for token in compiled.findall(chunk_text)
+        )
+
+    counter: Counter[bytes] = Counter()
+    for m in compiled.finditer(chunk_text):
+        counter[m.group().encode("utf-8")] += 1
+    return counter
+
+
+def _split_text_into_chunks(text: str, num_chunks: int) -> list[str]:
+    """Split *text* into roughly equal slices at newline (``\\n``) boundaries.
+
+    Splitting at newlines is **safe** for GPT-2 pre-tokenization because
+    none of the pattern's alternatives span a newline — ``\\n`` is always
+    consumed by the ``\\s+`` alternative and treated as a standalone token.
+
+    Args:
+        text: The full corpus string.
+        num_chunks: Target number of chunks.
+
+    Returns:
+        A list of text slices.  May contain fewer than *num_chunks* items
+        if the text has insufficient newlines.
+    """
+    if num_chunks <= 1:
+        return [text]
+
+    total_len = len(text)
+    chunk_size = total_len // num_chunks
+    chunks: list[str] = []
+    start = 0
+
+    for i in range(num_chunks):
+        if start >= total_len:
+            break
+        if i == num_chunks - 1:
+            chunks.append(text[start:])
+            break
+
+        end = start + chunk_size
+        # Walk forward to the nearest newline
+        nl = text.find("\n", end)
+        if nl == -1:
+            chunks.append(text[start:])
+            break
+        end = nl + 1  # include the newline in this chunk
+        chunks.append(text[start:end])
+        start = end
+
+    return [c for c in chunks if c]
+
+
+def _count_token_sequences_parallel(
+    text: str,
+    num_workers: int,
+) -> Counter[bytes]:
+    """Count pre-token frequencies using multiple processes via ``fork``.
+
+    The text is split into chunks and stored in the module-level
+    ``_fork_chunks``.  After forking, workers access their chunk by index
+    (an integer that fits in a single pipe buffer), avoiding the pipe
+    bottleneck of sending multi-megabyte strings.
+
+    Args:
+        text: The raw corpus string (at least ``_PARALLEL_THRESHOLD_CHARS``).
+        num_workers: Number of worker processes to spawn.
+
+    Returns:
+        A merged :class:`~collections.Counter` of ``{bytes: freq}``.
+    """
+    global _fork_chunks
+    _fork_chunks = _split_text_into_chunks(text, num_workers)
+
+    ctx = mp.get_context("fork")
+    merged: Counter[bytes] = Counter()
+
+    with ctx.Pool(processes=num_workers) as pool:
+        # Each worker receives an integer index, not a string chunk
+        indices = list(range(len(_fork_chunks)))
+        for result in pool.imap_unordered(_worker_by_index, indices, chunksize=1):
+            merged.update(result)
+
+    return merged
+
+
+# ===================================================================
 #  Serialization
 # ===================================================================
 
@@ -300,6 +432,7 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
     output_dir: str | Path | None = None,
+    num_workers: int | None = None,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     """Train a byte-pair encoding tokenizer on the corpus at *input_path*.
 
@@ -319,6 +452,9 @@ def train_bpe(
         output_dir: If provided, :func:`save_tokenizer` is called after
             training to persist ``vocab.json`` and ``merges.txt`` into
             this directory.
+        num_workers: Number of worker processes for parallel pre-tokenization.
+            Pass ``None`` to auto-detect (``min(cpu_count, 8)``).  Parallel
+            mode only activates when the text exceeds 10 MB.
 
     Returns:
         A tuple ``(vocab, merges)``:
@@ -339,30 +475,50 @@ def train_bpe(
     vocab = initialize_vocab(special_tokens)
 
     # ---- 3. Pre-tokenization → frequency counter ----
-    # Uses an adaptive strategy: findall (fast) for texts under 50 MB,
-    # finditer (streaming) for larger corpora.  Both paths produce a
-    # Counter keyed by bytes — no intermediate list of token strings
-    # is kept alive after this phase.
+    # Uses an adaptive strategy with three tiers:
+    #   (a) parallel multi-process for texts ≥ 10 MB (when num_workers > 1)
+    #   (b) findall (fast, list-based) for texts < 50 MB
+    #   (c) finditer (streaming) for large single-threaded texts
     t0 = time.perf_counter()
     special_bytes = {t.encode("utf-8") for t in special_tokens}
 
+    # Resolve number of workers and decide serial vs parallel
+    if num_workers is None:
+        num_workers = _DEFAULT_NUM_WORKERS
+    use_parallel = (
+        _FORK_AVAILABLE
+        and num_workers > 1
+        and len(text) >= _PARALLEL_THRESHOLD_CHARS
+    )
+
     if not special_tokens:
-        token_sequences = _count_token_sequences(text, special_bytes)
+        if use_parallel:
+            token_sequences = _count_token_sequences_parallel(text, num_workers)
+        else:
+            token_sequences = _count_token_sequences(text, special_bytes)
     else:
         # Only use the expensive regex-split path when special tokens
         # actually appear in the text.  A fast substring check avoids a
         # full regex scan when the tokens aren't present (the common case).
         needs_split = any(tok in text for tok in special_tokens)
         if not needs_split:
-            token_sequences = _count_token_sequences(text, special_bytes)
+            if use_parallel:
+                token_sequences = _count_token_sequences_parallel(text, num_workers)
+            else:
+                token_sequences = _count_token_sequences(text, special_bytes)
         else:
+            # Special tokens present — split first (serial), then count
+            # each part.  The split already breaks the text into smaller
+            # pieces, so parallelism here would have diminishing returns.
             escaped = "|".join(re.escape(tok) for tok in special_tokens)
             parts = re.split(f"({escaped})", text)
             token_sequences = Counter()
             for part in parts:
                 if not part or part in special_tokens:
                     continue
-                token_sequences.update(_count_token_sequences(part, special_bytes))
+                token_sequences.update(
+                    _count_token_sequences(part, special_bytes)
+                )
 
     timings["pretokenize+count"] = time.perf_counter() - t0
 
@@ -430,12 +586,12 @@ def train_bpe(
 
     # ---- Report timings ----
     timings["total"] = time.perf_counter() - t_start
-    _print_timings(timings, merge_count)
+    _print_timings(timings, merge_count, num_workers if use_parallel else 1)
 
     return vocab, merges
 
 
-def _print_timings(timings: dict[str, float], merge_count: int) -> None:
+def _print_timings(timings: dict[str, float], merge_count: int, num_workers: int = 1) -> None:
     """Print a formatted timing summary after training."""
     total = timings.get("total", 1.0)
     print("\n" + "=" * 52)
@@ -450,6 +606,8 @@ def _print_timings(timings: dict[str, float], merge_count: int) -> None:
     print(f"{'TOTAL':<25} {total:>10.2f}")
     if merge_count:
         print(f"{'Merges performed':<25} {merge_count:>10}")
+    if num_workers > 1:
+        print(f"{'Workers (parallel)':<25} {num_workers:>10}")
     print("=" * 52)
 
 
