@@ -121,7 +121,6 @@ def pretokenize(
     # re-tokenized with the standard GPT-2 pattern.
     escaped = "|".join(re.escape(tok) for tok in special_tokens)
     parts = re.split(f"({escaped})", text)
-
     tokens: list[str] = []
     for part in parts:
         if not part:
@@ -612,11 +611,11 @@ def _print_timings(timings: dict[str, float], merge_count: int, num_workers: int
 
 
 # ===================================================================
-#  CLI demo  (python -m cs336_basics.tokenizer.train)
+#  CLI demo  (uv run python -m cs336_basics.tokenizer.train)
 # ===================================================================
 if __name__ == "__main__":
     INPUT_PATH = "data/TinyStoriesV2-GPT4-train.txt"
-    VOCAB_SIZE = 10000
+    VOCAB_SIZE = 1000
     SPECIAL_TOKENS = ["<|endoftext|>"]
     OUTPUT_DIR = "out/tokenizer"
 
