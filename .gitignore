@@ -1,1 +1,11 @@
-/assignment1-basics/data/
+# macOS
+.DS_Store
+
+# Data files (large, should not be committed)
+**/data/
+
+# Output artifacts
+**/out/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/

@@ -35,7 +35,6 @@ class Tokenizer:
             for line in vocab_file:
                 token, token_id = line.strip().split()
                 vocab[token] = int(token_id)
-
         merges = []
         with open(merges_filepath, 'r', encoding='utf-8') as merges_file:
             for line in merges_file:
@@ -43,7 +42,6 @@ class Tokenizer:
                     continue  # Skip comment lines
                 merge = tuple(line.strip().split())
                 merges.append(merge)
-
         return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
     
     
@@ -61,18 +59,16 @@ class Tokenizer:
         """
         if not text:
             return []
-
         encoded_ids = []
         pre_tokens = pretokenize(text, self.special_tokens)
-
+        
         for token in pre_tokens:
-            if token in self.special_tokens:
+            if token in self.special_tokens: 
                 encoded_ids.append(self.vocab_reverse[token.encode("utf-8")])
                 continue
-
             byte_seq = token.encode("utf-8")
             tokens = [bytes([b]) for b in byte_seq]
-
+            
             while True:
                 best_priority = None
                 best_pos = -1
@@ -114,5 +110,5 @@ class Tokenizer:
         Returns:
             The decoded string corresponding to the input token IDs.
         """
-        all_bytes = b''.join(self.vocab[id] for id in ids)
+        all_bytes = b''.join(self.vocab_reverse[id] for id in ids)
         return all_bytes.decode("utf-8", errors="replace")

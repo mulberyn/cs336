@@ -31,7 +31,7 @@ def run_linear(
     from cs336_basics.modules.linear import Linear
     
     linear_layer = Linear(d_in, d_out)
-    linear_layer.load_state_dict({'weight': weights.T})
+    linear_layer.load_state_dict({'weight': weights})
     return linear_layer(in_features)
 
 
@@ -89,7 +89,15 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.modules.swiglu import SwiGLUFFN
+    
+    ffn = SwiGLUFFN(d_model=d_model, d_ff=d_ff)
+    ffn.w1.load_state_dict({"weight": w1_weight})
+    ffn.w2.load_state_dict({"weight": w2_weight})
+    ffn.w3.load_state_dict({"weight": w3_weight})
+    
+    return ffn(in_features)
+    
 
 
 def run_scaled_dot_product_attention(
