@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import math
+from einops import rearrange, einsum
 
 
 class Linear(nn.Module):
@@ -52,4 +53,5 @@ class Linear(nn.Module):
             torch.Tensor: 输出张量，形状为 (..., out_features)
             前导维度与输入保持一致。
         """
-        return self.weight @ x
+        # return einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
+        return x @ self.weight.T
