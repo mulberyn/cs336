@@ -46,12 +46,10 @@ class SwiGLU(nn.Module):
             dtype (torch.dtype | None, optional): 参数数据类型。
         """
         super().__init__()
-
         # 若未指定 d_ff，则按 8/3 * d_model 计算并对齐到 64 的倍数
         if d_ff is None:
             d_ff = int((8 / 3) * d_model)
             d_ff = ((d_ff + 63) // 64) * 64
-
         # 激活支路：d_model -> d_ff
         self.w1 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
         # 门控支路：d_model -> d_ff
