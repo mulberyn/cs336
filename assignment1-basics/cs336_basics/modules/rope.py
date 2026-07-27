@@ -7,8 +7,6 @@ class RoPE(nn.Module):
     
     通过旋转矩阵对 query 和 key 的向量进行位置相关的变换，使得内积结果天然包含相对位置信息。
     该实现预先计算所有位置的 cos 和 sin 值，并在前向传播中根据 `token_positions` 直接索引取值。
-    
-    参考文献：RoFormer: Enhanced Transformer with Rotary Position Embedding
     """
     
     def __init__(
