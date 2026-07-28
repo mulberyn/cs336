@@ -37,6 +37,7 @@ class RMSNorm(nn.Module):
         """
         super().__init__()
         self.eps = eps
+        
         # 增益参数初始化为全 1，使得模块初始时近似恒等映射
         self.weight = nn.Parameter(
             torch.ones(d_model, device=device, dtype=dtype)
@@ -61,6 +62,7 @@ class RMSNorm(nn.Module):
         """
         # 保存输入原始数据类型
         in_dtype = x.dtype
+        
         # 转为 float32 以保证数值稳定性（避免 float16 平方溢出）
         x = x.to(torch.float32)
 

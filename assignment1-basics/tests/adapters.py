@@ -315,7 +315,39 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import TransformerBlock
+    
+    # 创建 TransformerBlock 实例（透传设备与类型）
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        max_seq_len=max_seq_len,
+        theta=theta,
+        device=in_features.device,
+        dtype=in_features.dtype
+    )
+    
+    # 2. 构建目标状态字典（映射外部键 → 内部键，并处理转置）
+    state_dict = {}
+
+    # 线性层：外部形状为 (out, in)，我们的 Linear 存储为 (in, out)，需要转置
+    linear_mapping = {
+        'mha.wq.weight': 'attn.q_proj.weight',
+        'mha.wk.weight': 'attn.k_proj.weight',
+        'mha.wv.weight': 'attn.v_proj.weight',
+        'mha.wo.weight': 'attn.output_proj.weight',
+        'ffn.w1.weight': 'ffn.w1.weight',
+        'ffn.w2.weight': 'ffn.w2.weight',
+        'ffn.w3.weight': 'ffn.w3.weight',
+        'norm1.weight': 'ln1.weight',
+        'norm2.weight': 'ln2.weight',
+    }
+    for target_key, source_key in linear_mapping.items():
+        state_dict[target_key] = weights[source_key]        
+    block.load_state_dict(state_dict, strict=True)
+
+    return block(in_features)
 
 
 def run_transformer_lm(

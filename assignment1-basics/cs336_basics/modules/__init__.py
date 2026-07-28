@@ -9,6 +9,9 @@ from .rope import RoPE
 from .scaled_dot_product_attention import scaled_dot_product_attention
 from .softmax import softmax
 from .swiglu import SwiGLU
+from .transformer import (
+    TransformerBlock    
+)
 
 __all__ = [
     "Embedding",
@@ -16,7 +19,8 @@ __all__ = [
     "MultiHeadSelfAttention",
     "RMSNorm",
     "RoPE",
-    "ScaledDotProductAttention",
-    "Softmax",
+    "scaled_dot_product_attention",
+    "softmax",
     "SwiGLU",
+    "TransformerBlock",
 ]

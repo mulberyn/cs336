@@ -48,7 +48,7 @@ class RoPE(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        token_positions: torch.Tensor
+        token_positions: torch.Tensor | None
     ) -> torch.Tensor:
         """
         对输入张量 x 应用旋转位置编码。
@@ -66,6 +66,7 @@ class RoPE(nn.Module):
         """
         # 1. 根据 token_positions 索引预计算的 cos/sin 表
         #    结果形状为 (batch, seq_len, d_k//2)
+        
         cos = self.cos[token_positions]   # 支持高级索引，要求 token_positions 在 [0, max_seq_len) 内
         sin = self.sin[token_positions]
         
