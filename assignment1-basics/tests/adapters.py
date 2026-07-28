@@ -429,7 +429,47 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import TransformerLM
+    device = in_indices.device
+    dtype = torch.get_default_dtype()
+    
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+        device=device,
+        dtype=dtype
+    )
+    
+    state_dict = {}
+    state_dict['token_embedding.weight'] = weights['token_embeddings.weight']
+    for i in range(num_layers):
+        prefix = f'transformer_blocks.{i}.'
+        layer_prefix = f'layers.{i}.'
+        
+        linear_pairs = [
+            ('mha.wq.weight', 'attn.q_proj.weight'),
+            ('mha.wk.weight', 'attn.k_proj.weight'),
+            ('mha.wv.weight', 'attn.v_proj.weight'),
+            ('mha.wo.weight', 'attn.output_proj.weight'),
+            ('ffn.w1.weight', 'ffn.w1.weight'),
+            ('ffn.w2.weight', 'ffn.w2.weight'),
+            ('ffn.w3.weight', 'ffn.w3.weight'),
+            ('norm1.weight', 'ln1.weight'),
+            ('norm2.weight', 'ln2.weight')
+        ]
+        for target, source in linear_pairs:
+            state_dict[prefix + target] = weights[layer_prefix + source]
+            
+    state_dict['output_norm.weight'] = weights['ln_final.weight']
+    state_dict['output_embedding.weight'] = weights['lm_head.weight']
+    
+    model.load_state_dict(state_dict, strict=True)
+    return model(in_indices)
 
 
 def run_rmsnorm(

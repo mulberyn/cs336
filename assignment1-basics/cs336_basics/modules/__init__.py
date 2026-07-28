@@ -10,7 +10,8 @@ from .scaled_dot_product_attention import scaled_dot_product_attention
 from .softmax import softmax
 from .swiglu import SwiGLU
 from .transformer import (
-    TransformerBlock    
+    TransformerBlock,
+    TransformerLM
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "softmax",
     "SwiGLU",
     "TransformerBlock",
+    "TransformerLM"
 ]

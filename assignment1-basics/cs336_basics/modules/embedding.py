@@ -17,7 +17,6 @@ class Embedding(nn.Module):
                                在训练过程中会被优化。
     """
 
-
     def __init__(
         self,
         num_embeddings: int,
@@ -29,7 +28,7 @@ class Embedding(nn.Module):
         初始化嵌入模块。
 
         Args:
-            num_embeddings (int): 词表大小（不同 ID 的个数）。
+            num_embeddings (int): 词表大小（不同 ID 的个数），也即 vocab_size
             embedding_dim (int): 每个嵌入向量的维度，即论文中的 d_model。
             device (torch.device | None, optional): 参数存储的设备（如 'cuda'）。
             dtype (torch.dtype | None, optional): 参数的数据类型（如 torch.float32）。
