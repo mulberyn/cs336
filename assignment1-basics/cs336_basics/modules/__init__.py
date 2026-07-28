@@ -1,6 +1,5 @@
 # cs336_basics/modules/__init__.py
 
-# 导入各模块的公开类/函数，使它们可以从包级别直接访问
 from .embedding import Embedding
 from .linear import Linear
 from .multihead_self_attention import MultiHeadSelfAttention
