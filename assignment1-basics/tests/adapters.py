@@ -28,7 +28,7 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    from cs336_basics.modules.linear import Linear
+    from cs336_basics.modules import Linear
     
     linear_layer = Linear(d_in, d_out)
     linear_layer.load_state_dict({'weight': weights})
@@ -53,7 +53,7 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    from cs336_basics.modules.embedding import Embedding
+    from cs336_basics.modules import Embedding
 
     embedding_layer = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
     embedding_layer.load_state_dict({'weight': weights})
@@ -89,7 +89,7 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    from cs336_basics.modules.swiglu import SwiGLU
+    from cs336_basics.modules import SwiGLU
     
     ffn = SwiGLU(d_model=d_model, d_ff=d_ff)
     ffn.w1.load_state_dict({"weight": w1_weight})
@@ -118,7 +118,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    from cs336_basics.modules.scaled_dot_product_attention import scaled_dot_product_attention
+    from cs336_basics.modules import scaled_dot_product_attention
     return scaled_dot_product_attention(Q, K, V, mask)
 
 
@@ -153,7 +153,18 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import MultiHeadSelfAttention
+    mha = MultiHeadSelfAttention(
+        d_model, 
+        num_heads,
+        device=in_features.device, 
+        dtype=in_features.dtype
+    )
+    mha.wq.load_state_dict({'weight': q_proj_weight})
+    mha.wk.load_state_dict({'weight': k_proj_weight})
+    mha.wv.load_state_dict({'weight': v_proj_weight})
+    mha.wo.load_state_dict({'weight': o_proj_weight})
+    return mha(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -193,7 +204,20 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    from cs336_basics.modules import MultiHeadSelfAttention, RoPE
+    rope = RoPE(theta, d_model // num_heads, max_seq_len, in_features.device, in_features.dtype)
+    mha = MultiHeadSelfAttention(
+        d_model, 
+        num_heads,
+        rope,
+        in_features.device, 
+        in_features.dtype
+    )
+    mha.wq.load_state_dict({'weight': q_proj_weight})
+    mha.wk.load_state_dict({'weight': k_proj_weight})
+    mha.wv.load_state_dict({'weight': v_proj_weight})
+    mha.wo.load_state_dict({'weight': o_proj_weight})
+    return mha(in_features, token_positions)
 
 
 def run_rope(
@@ -215,7 +239,7 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    from cs336_basics.modules.rope import RoPE
+    from cs336_basics.modules import RoPE
     rope_layer = RoPE(theta=theta, d_k=d_k, max_seq_len=max_seq_len)
     return rope_layer(in_query_or_key, token_positions)
     
@@ -396,9 +420,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    from cs336_basics.modules.rmsnorm import RMSnorm
+    from cs336_basics.modules import RMSNorm
     
-    rmsnorm_layer = RMSnorm(d_model=d_model, eps=eps)
+    rmsnorm_layer = RMSNorm(d_model=d_model, eps=eps)
     rmsnorm_layer.load_state_dict({"weight": weights})
     return rmsnorm_layer(in_features)
 

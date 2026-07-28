@@ -14,7 +14,8 @@ class RoPE(nn.Module):
         theta: float,
         d_k: int,               # 即 d_model，必须为偶数
         max_seq_len: int,
-        device: torch.device | None = None
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None
     ):
         """
         构造 RoPE 模块，预计算所有位置的正弦/余弦值。
@@ -27,14 +28,18 @@ class RoPE(nn.Module):
         """
         super().__init__()
         assert d_k % 2 == 0, "d_k must be even."
+        
         # 计算逆频率因子，形状 (d_k // 2)
         # 对于第 i 对维度（i=0,1,...,d_k//2-1），频率为 theta^{-2i/d_k}
-        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2).float() / d_k))
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2, device=device, dtype=dtype).float() / d_k))
         self.register_buffer('inv_freq', inv_freq, persistent=False)
+        
         # 生成所有位置的位置索引向量 (max_seq_len,)
-        positions = torch.arange(max_seq_len)
+        positions = torch.arange(max_seq_len, device=device)
+        
         # 外积得到每个位置在每个频率下的角度： (max_seq_len, d_k//2)
-        freqs = torch.einsum('i, j -> ij', positions, inv_freq)
+        freqs = torch.einsum('i, j -> ij', positions.to(dtype), inv_freq)
+        
         # 预计算 cos 和 sin 并注册为 buffer（非持久化，不存入 state_dict）
         self.register_buffer('cos', freqs.cos(), persistent=False)  # (max_seq_len, d_k//2)
         self.register_buffer('sin', freqs.sin(), persistent=False)  # (max_seq_len, d_k//2)
@@ -63,18 +68,23 @@ class RoPE(nn.Module):
         #    结果形状为 (batch, seq_len, d_k//2)
         cos = self.cos[token_positions]   # 支持高级索引，要求 token_positions 在 [0, max_seq_len) 内
         sin = self.sin[token_positions]
+        
         # 2. 将最后一维 d_k 拆分为 (d_k//2, 2)，便于成对处理
         #    x_reshaped 形状: (..., d_k//2, 2)
         x_reshaped = x.view(*x.shape[:-1], -1, 2)
+        
         # 3. 分别取出每一对的第一个和第二个元素
         x1 = x_reshaped[..., 0]   # (..., d_k//2)
         x2 = x_reshaped[..., 1]   # (..., d_k//2)
+        
         # 4. 应用二维旋转矩阵：
         #    [ x1' ]   [ cos  -sin ] [ x1 ]
         #    [ x2' ] = [ sin   cos ] [ x2 ]
         rotated_x1 = x1 * cos - x2 * sin
         rotated_x2 = x1 * sin + x2 * cos
+        
         # 5. 将旋转后的两个分量重新堆叠为最后一维
         rotated = torch.stack([rotated_x1, rotated_x2], dim=-1)  # (..., d_k//2, 2)
+        
         # 6. 恢复原始形状 (..., d_k)
         return rotated.view(*x.shape)

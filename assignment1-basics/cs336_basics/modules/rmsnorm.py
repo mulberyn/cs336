@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 
-class RMSnorm(nn.Module):
+class RMSNorm(nn.Module):
     """
     均方根层归一化（Root Mean Square Layer Normalization）。
 
