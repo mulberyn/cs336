@@ -5,11 +5,11 @@ from typing import Iterable, Iterator
 class Tokenizer:
     def __init__(
         self, 
-        vocab: dict[str, int], 
+        vocab: dict[int, str], 
         merges: list[tuple[str, str]], 
         special_tokens: list[str] | None = None
     ):
-        self.vocab = vocab
+        self.vocab = vocab # vocab()
         self.vocab_reverse = {v: k for k, v in vocab.items()}
         self.merges = merges
         self.pair_to_priority = {pair: i for i, pair in enumerate(merges)}
@@ -110,5 +110,5 @@ class Tokenizer:
         Returns:
             The decoded string corresponding to the input token IDs.
         """
-        all_bytes = b''.join(self.vocab_reverse[id] for id in ids)
+        all_bytes = b''.join(self.vocab[id] for id in ids)
         return all_bytes.decode("utf-8", errors="replace")
