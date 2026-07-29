@@ -57,6 +57,7 @@ def run_embedding(
 
     embedding_layer = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
     embedding_layer.load_state_dict({'weight': weights})
+    
     return embedding_layer(token_ids)
 
 
@@ -119,6 +120,7 @@ def run_scaled_dot_product_attention(
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
     from cs336_basics.modules import scaled_dot_product_attention
+    
     return scaled_dot_product_attention(Q, K, V, mask)
 
 
@@ -533,7 +535,9 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    from cs336_basics.trainer import data_loading
+    
+    return data_loading(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
@@ -550,6 +554,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         softmax normalizing the specified `dim`.
     """
     from cs336_basics.modules.softmax import softmax
+    
     return softmax(in_features, dim)
 
 
@@ -569,6 +574,7 @@ def run_cross_entropy(
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
     from cs336_basics.trainer import cross_entropy
+    
     return cross_entropy(inputs, targets)
 
 
@@ -582,6 +588,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
     from cs336_basics.trainer import gradient_clipping
+    
     return gradient_clipping(parameters, max_l2_norm)
 
 
@@ -619,7 +626,14 @@ def run_get_lr_cosine_schedule(
         Learning rate at the given iteration under the specified schedule.
     """
     from cs336_basics.trainer import get_lr_cosine_schedule
-    return get_lr_cosine_schedule(it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters)
+    
+    return get_lr_cosine_schedule(
+        it, 
+        max_learning_rate, 
+        min_learning_rate, 
+        warmup_iters, 
+        cosine_cycle_iters
+    )
 
 
 def run_save_checkpoint(
@@ -662,8 +676,6 @@ def run_load_checkpoint(
     raise NotImplementedError
 
 
-from cs336_basics.tokenizer.tokenizer import Tokenizer
-
 def get_tokenizer(
     vocab: dict[int, bytes],
     merges: list[tuple[bytes, bytes]],
@@ -684,10 +696,10 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
+    from cs336_basics.tokenizer import Tokenizer
+    
     return Tokenizer(vocab=vocab, merges=merges, special_tokens=special_tokens)
 
-
-from cs336_basics.tokenizer.train import train_bpe
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -716,5 +728,6 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
+    from cs336_basics.tokenizer import train_bpe
     
     return train_bpe(input_path, vocab_size, special_tokens)
