@@ -40,3 +40,22 @@ def get_lr_cosine_schedule(
         return lr_min + 0.5 * (1 + math.cos((t - t_warm) / (t_end - t_warm) * math.pi)) * (lr_max - lr_min)
     else:
         return lr_min
+    
+
+def gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter], 
+    max_l2_norm: float
+) -> None:
+    eps = 1e-6
+    grads = [p.grad for p in parameters if p.grad is not None]
+    
+    l2_norm = 0
+    for g in grads:
+        l2_norm += (g.data ** 2).sum()
+    l2_norm = l2_norm ** 0.5
+    
+    alpha = max_l2_norm / (l2_norm + eps)
+    
+    if l2_norm > max_l2_norm:
+        for g in grads:
+            g.data *= alpha
