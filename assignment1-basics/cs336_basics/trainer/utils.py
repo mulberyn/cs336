@@ -1,6 +1,6 @@
 import torch
-
-from ..modules import softmax
+import math
+from collections.abc import Iterable
 
 def cross_entropy(
     out_logits: torch.Tensor,
@@ -25,3 +25,18 @@ def cross_entropy(
     
     # 5. 返回平均交叉熵损失（注意：根据前一个报错，你应该用 mean，而不是 sum）
     return -torch.mean(log_probs)
+
+
+def get_lr_cosine_schedule(
+    t: int,
+    lr_max: float,
+    lr_min: float,
+    t_warm: int,
+    t_end: int
+) -> float:
+    if t < t_warm:
+        return t / t_warm * lr_max
+    elif t <= t_end:
+        return lr_min + 0.5 * (1 + math.cos((t - t_warm) / (t_end - t_warm) * math.pi)) * (lr_max - lr_min)
+    else:
+        return lr_min
