@@ -3,7 +3,9 @@
 from .utils import (
     cross_entropy
 )
+from .adamw import AdamW
 
 __all__ = [
-    "cross_entropy"
+    "cross_entropy",
+    "AdamW"
 ]
