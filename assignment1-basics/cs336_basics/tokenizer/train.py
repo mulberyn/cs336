@@ -469,6 +469,7 @@ def train_bpe(
     t0 = time.perf_counter()
     text = load_text(input_path)
     timings["load_text"] = time.perf_counter() - t0
+    print("Text loading done.")
 
     # ---- 2. Initialize vocabulary ----
     vocab = initialize_vocab(special_tokens)
@@ -520,12 +521,14 @@ def train_bpe(
                 )
 
     timings["pretokenize+count"] = time.perf_counter() - t0
+    print("Pretokenization and counting done.")
 
     # ---- 4. Build incremental data structures + heap ----
     t0 = time.perf_counter()
     words_dict, pair_counts, pair_to_words = build_structures(dict(token_sequences))
     heap = init_heap(pair_counts, vocab)
     timings["build_structures"] = time.perf_counter() - t0
+    print("Building structures done.")
 
     # ---- 5. Main training loop ----
     t0 = time.perf_counter()
@@ -585,7 +588,7 @@ def train_bpe(
 
     # ---- Report timings ----
     timings["total"] = time.perf_counter() - t_start
-    _print_timings(timings, merge_count, num_workers if use_parallel else 1)
+    # _print_timings(timings, merge_count, num_workers if use_parallel else 1)
 
     return vocab, merges
 
