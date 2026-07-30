@@ -9,3 +9,11 @@
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints/
+
+**/AGENTS.md
+**/CLAUDE.md
+**/CHANGELOG.md
+**/*.pdf
+
+**/LICENSE
+**/make_submission.sh
