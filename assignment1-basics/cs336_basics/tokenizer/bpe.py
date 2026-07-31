@@ -28,9 +28,12 @@ def pretokenize(
     parts = re.split(f"({escaped})", text)
     pretokens: list[str] = []
     for part in parts:
-        if part in special_tokens:  # 如果是空的或者为 special_token 那么就去掉
+        if not part:
             continue
-        pretokens.extend(re.findall(GPT2_PATTERN, part))
+        if part in special_tokens:
+            pretokens.append(part)
+        else:
+            pretokens.extend(re.findall(GPT2_PATTERN, part))
     return pretokens
 
 
@@ -111,6 +114,8 @@ def train_bpe(
     pair_freq = Counter()
     pair_to_indices = defaultdict(set)
     for part in pretokens:
+        if part in special_tokens:
+            continue
         idx = len(words)
         word = list(part.encode('utf-8')) # word: list[int]
         words.append(word)
@@ -142,3 +147,61 @@ def train_bpe(
             pbar.set_postfix({"vocab_size": len(vocab)})
     
     return vocab, merges
+
+
+import base64
+import json
+
+
+def save_tokenizer(
+    vocab: dict[int, bytes],
+    merges: list[tuple[bytes, bytes]],
+    special_tokens: list[str],
+    vocab_filepath: str,
+    merges_filepath: str
+) -> None:
+    # 将 vocab 的键转为字符串，值转为 Base64 字符串
+    vocab_b64 = {str(k): base64.b64encode(v).decode('ascii') for k, v in vocab.items()}
+    # 将 merges 的每个 bytes 对转为 Base64 字符串对
+    merges_b64 = [
+        (base64.b64encode(left).decode('ascii'), base64.b64encode(right).decode('ascii'))
+        for left, right in merges
+    ]
+
+    vocab_data = {
+        "special_tokens": special_tokens,
+        "vocab": vocab_b64
+    }
+    merges_data = {"merges": merges_b64}
+
+    with open(vocab_filepath, "w", encoding="utf-8") as f:
+        json.dump(vocab_data, f, indent=2)   # indent 可选，便于阅读
+    with open(merges_filepath, "w", encoding="utf-8") as f:
+        json.dump(merges_data, f, indent=2)
+
+
+def load_tokenizer(
+    vocab_filepath: str,
+    merges_filepath: str
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]], list[str]]:
+    """
+    从两个 JSON 文件加载 tokenizer 数据，返回 (vocab, merges, special_tokens)。
+    """
+    with open(vocab_filepath, "r", encoding="utf-8") as f:
+        vocab_data = json.load(f)
+    with open(merges_filepath, "r", encoding="utf-8") as f:
+        merges_data = json.load(f)
+
+    # 还原 vocab：键从字符串转回 int，值从 Base64 解码为 bytes
+    vocab = {
+        int(k): base64.b64decode(v.encode('ascii'))
+        for k, v in vocab_data["vocab"].items()
+    }
+    # 还原 merges：每个 Base64 字符串对解码为 bytes 对
+    merges = [
+        (base64.b64decode(left.encode('ascii')), base64.b64decode(right.encode('ascii')))
+        for left, right in merges_data["merges"]
+    ]
+    special_tokens = vocab_data.get("special_tokens", []) 
+
+    return vocab, merges, special_tokens
