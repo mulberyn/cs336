@@ -21,7 +21,7 @@ def cross_entropy(
     
     # 4. 提取出 targets 对应位置的对数概率
     # 使用 gather 或高级索引，这里保持你原来的写法
-    log_probs = log_softmax[range(out_logits.shape[0]), targets]
+    log_probs = log_softmax.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(1)
     
     # 5. 返回平均交叉熵损失（注意：根据前一个报错，你应该用 mean，而不是 sum）
     return -torch.mean(log_probs)

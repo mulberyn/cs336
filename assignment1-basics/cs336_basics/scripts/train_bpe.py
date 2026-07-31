@@ -14,7 +14,7 @@ def load_prase():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="示例：python train_bpe.py data/train.txt --vocab-size 10000 --special-tokens <|endoftext|>"
     )
-    parser.add_argument("input_path", type=str, default=DEFAULT_INPUT_PATH, help="UTF-8 训练语料库路径")
+    parser.add_argument("--input-path", type=str, default=DEFAULT_INPUT_PATH, help="UTF-8 训练语料库路径")
     parser.add_argument("--vocab-size", type=int, default=10000, help="目标词表大小（≥ 256）")
     parser.add_argument("--special-tokens", nargs="*", default=['<|endoftext|>'], help="特殊 token 列表，例如 <|endoftext|>")
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUT_DIR, help="输出目录（默认 ./out/tokenizer）")
