@@ -1,4 +1,4 @@
-from .bpe import pretokenize
+from .bpe import pretokenize, load_tokenizer
 from typing import Iterable
 
 
@@ -37,19 +37,10 @@ class Tokenizer:
             merges_filepath: Path to the merges file.
             special_tokens: Optional list of special tokens to include in the tokenizer.
         """
-        vocab = {}
-        with open(vocab_filepath, 'r', encoding='utf-8') as vocab_file:
-            for line in vocab_file:
-                token, token_id = line.strip().split()
-                vocab[token] = int(token_id)
-        merges = []
-        with open(merges_filepath, 'r', encoding='utf-8') as merges_file:
-            for line in merges_file:
-                if line.startswith('#'):
-                    continue  # Skip comment lines
-                merge = tuple(line.strip().split())
-                merges.append(merge)
-        return cls(vocab=vocab, merges=merges, special_tokens=special_tokens)
+        vocab, merges, saved_special = load_tokenizer(vocab_filepath, merges_filepath)
+        if special_tokens is None:
+            special_tokens = saved_special
+        return cls(vocab, merges, special_tokens)
     
     
     def encode(

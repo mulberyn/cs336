@@ -23,7 +23,7 @@ def load_tokenizer(
 ) -> Tokenizer:
     return Tokenizer.from_file(
         vocab_filepath=Path(tokenizer_dir) / "vocab.json",
-        merges_filepath=Path(tokenizer_dir) / "merges.txt"
+        merges_filepath=Path(tokenizer_dir) / "merges.json"
     )
 
 
