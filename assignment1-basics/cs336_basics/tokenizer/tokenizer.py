@@ -1,5 +1,4 @@
-import heapq
-from .train import pretokenize
+from .bpe import pretokenize
 from typing import Iterable
 
 
