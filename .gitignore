@@ -18,5 +18,7 @@
 **/LICENSE
 **/make_submission.sh
 
+**/docs
+
 # Weights & Biases logs
 wandb/
