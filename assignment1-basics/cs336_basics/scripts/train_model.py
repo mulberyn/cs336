@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
     'wandb_project': 'cs336-transformer',
     'wandb_run_name': None,
     'no_wandb': False,
-    'export_final': './model_final.pt',   # 最终模型导出路径
+    'export_final': './out/model/model_final.pt',   # 最终模型导出路径
 }
 
 def load_prase():
