@@ -1,4 +1,4 @@
-# CS336 2025 年春季学期 作业一：基础
+# CS336 2025 年春季学期 assignment1-basics
 
 有关作业的完整说明，请参阅作业说明文档
 [cs336_assignment1_basics.pdf](./cs336_assignment1_basics.pdf)
