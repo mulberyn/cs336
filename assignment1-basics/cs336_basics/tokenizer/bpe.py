@@ -748,6 +748,9 @@ def save_tokenizer(
     vocab_filepath: str,
     merges_filepath: str
 ) -> None:
+    os.makedirs(os.path.dirname(vocab_filepath), exist_ok=True)
+    os.makedirs(os.path.dirname(merges_filepath), exist_ok=True)
+    
     # 将 vocab 的键转为字符串，值转为 Base64 字符串
     vocab_b64 = {str(k): base64.b64encode(v).decode('ascii') for k, v in vocab.items()}
     # 将 merges 的每个 bytes 对转为 Base64 字符串对

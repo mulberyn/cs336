@@ -4,8 +4,13 @@ from pathlib import Path
 
 from cs336_basics.tokenizer import train_bpe, save_tokenizer
 
-DEFAULT_INPUT_PATH = "./data/TinyStoriesV2-GPT4-train.txt"
-DEFAULT_OUT_DIR = "./out/tokenizer"
+DEFAULT_CONFIG = {
+    'input_path': "./data/TinyStoriesV2-GPT4-train.txt",
+    'vocab_size': 10000, 
+    'special_tokens': ['<|endoftext|>'],
+    'tokenizer_dir': "./out/tokenizer",
+    'num_workers': 1,
+}
 
 
 def load_prase():
@@ -14,11 +19,11 @@ def load_prase():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="示例：python train_bpe.py data/train.txt --vocab-size 10000 --special-tokens <|endoftext|>"
     )
-    parser.add_argument("--input-path", type=str, default=DEFAULT_INPUT_PATH, help="UTF-8 训练语料库路径")
-    parser.add_argument("--vocab-size", type=int, default=10000, help="目标词表大小（≥ 256）")
-    parser.add_argument("--special-tokens", nargs="*", default=['<|endoftext|>'], help="特殊 token 列表，例如 <|endoftext|>")
-    parser.add_argument("--output-dir", type=str, default=DEFAULT_OUT_DIR, help="输出目录（默认 ./out/tokenizer）")
-    parser.add_argument("--num-workers", type=int, default=1, help="并行预分词 worker 数（默认 1）")
+    parser.add_argument("--input_path", type=str, default=DEFAULT_CONFIG['input_path'], help="UTF-8 训练语料库路径")
+    parser.add_argument("--vocab_size", type=int, default=DEFAULT_CONFIG['vocab_size'], help="目标词表大小（≥ 256）")
+    parser.add_argument("--special_tokens", nargs="*", default=DEFAULT_CONFIG['special_tokens'], help="特殊 token 列表，例如 <|endoftext|>")
+    parser.add_argument("--tokenizer_dir", type=str, default=DEFAULT_CONFIG['tokenizer_dir'], help="输出目录（默认 ./out/tokenizer）")
+    parser.add_argument("--num_workers", type=int, default=DEFAULT_CONFIG['num_workers'], help="并行预分词 worker 数（默认 1）")
     args = parser.parse_args()
     return args
 
@@ -51,12 +56,18 @@ def main():
         return 1
     
     try:
-        save_tokenizer(vocab, merges, args.special_tokens, vocab_filepath=args.output_dir + "/vocab.json", merges_filepath=args.output_dir + "/merges.json")
+        save_tokenizer(
+            vocab, 
+            merges, 
+            args.special_tokens, 
+            vocab_filepath=args.tokenizer_dir + "/vocab.json", 
+            merges_filepath=args.tokenizer_dir + "/merges.json"
+        )
     except OSError as e:
         print(f"保存失败：{e}", file=sys.stderr)
         return 1
     
-    print(f"训练完成，词表大小：{len(vocab)}，合并数：{len(merges)}")
+    print(f"训练完成，词表大小：{len(vocab)}，合并数：{len(merges)}，保存在：{args.tokenizer_dir}")
     return 0
 
 

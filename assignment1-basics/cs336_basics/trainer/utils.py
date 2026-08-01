@@ -43,19 +43,28 @@ def get_lr_cosine_schedule(
     
 
 def gradient_clipping(
-    parameters: Iterable[torch.nn.Parameter], 
+    parameters: Iterable[torch.nn.Parameter],
     max_l2_norm: float
-) -> None:
-    eps = 1e-6
+) -> float:
+    """
+    计算所有参数梯度的全局 L2 范数，若超过阈值则等比例缩放。
+    返回裁剪前的梯度范数（浮点数）。
+    """
+    # 收集所有非 None 梯度
     grads = [p.grad for p in parameters if p.grad is not None]
-    
-    l2_norm = 0
+    if not grads:
+        return 0.0
+
+    # 计算全局 L2 范数
+    total_norm = 0.0
     for g in grads:
-        l2_norm += (g.data ** 2).sum()
-    l2_norm = l2_norm ** 0.5
-    
-    alpha = max_l2_norm / (l2_norm + eps)
-    
-    if l2_norm > max_l2_norm:
+        total_norm += (g.data ** 2).sum().item()   # 用 item() 转为 Python 标量，避免累积张量
+    total_norm = total_norm ** 0.5
+
+    # 若超过阈值，则等比例缩放
+    if total_norm > max_l2_norm:
+        scale = max_l2_norm / total_norm
         for g in grads:
-            g.data *= alpha
+            g.data *= scale
+
+    return total_norm   # 返回裁剪前的范数（与 PyTorch 行为一致）
