@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     'model_path': './out/model/model_final.pt',
     'tokenizer_dir': './out/tokenizer',
     'prompt': 'Once upon a time,',
-    'max_new_tokens': 100,
+    'max_new_tokens': 200,
     'temperature': 0.8,
     'top_p': 0.9,
     'stop_token': '<|endoftext|>',
@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
 def load_parse():
     parser = argparse.ArgumentParser(description="从训练好的 TransformerLM 生成文本")
     parser.add_argument("--model_path", type=str, default=DEFAULT_CONFIG['model_path'], help="训练好的模型文件 (.pt)")
-    parser.add_argument("--tokenizer_dir", type=str, default=DEFAULT_CONFIG['tokenizer_dir'], help="词表文件 (vocab.json)")
+    parser.add_argument("--tokenizer_dir", type=str, default=DEFAULT_CONFIG['tokenizer_dir'], help="tokenizer 目录")
     parser.add_argument("--prompt", type=str, default=DEFAULT_CONFIG['prompt'], help="生成的前缀文本")
     parser.add_argument("--max_new_tokens", type=int, default=DEFAULT_CONFIG['max_new_tokens'], help="最大生成 token 数")
     parser.add_argument("--temperature", type=float, default=DEFAULT_CONFIG['temperature'], help="温度 (0 表示贪婪采样)")
@@ -67,16 +67,16 @@ def generate(
     model,
     tokenizer,
     prompt: str, 
+    context_length: int,
     max_new_tokens: int, 
     temperature: float, 
     top_p: float,
     stop_token: str,
     device,
-    context_length: int
 ) -> str:
     input_ids = tokenizer.encode(prompt)
-    input_tensor = torch.Tensor([input_ids], device=device) # input_tensor (1, seq_len)
-    eos_token_id = tokenizer.encode(stop_token)
+    input_tensor = torch.tensor([input_ids], device=device) # input_tensor (1, seq_len)
+    eos_token_id = tokenizer.encode(stop_token)[0]
     
     model.eval()
     with torch.no_grad():
@@ -124,7 +124,7 @@ def main():
 
     # 加载 tokenizer
     print("加载 tokenizer ...")
-    tokenizer = Tokenizer.from_files(args.tokenzier_dir + '/vocab.json', args.tokenzier_dir + '/merges.json',
+    tokenizer = Tokenizer.from_file(args.tokenizer_dir + '/vocab.json', args.tokenizer_dir + '/merges.json',
                                      special_tokens=[args.stop_token])
 
     # 加载模型
@@ -143,7 +143,6 @@ def main():
         rope_theta=model_config["rope_theta"],
         device=device,
         dtype=None,          # 默认 float32
-        context_length=model_config["context_length"],
     )
     model.load_state_dict(state_dict, strict=True)
     model.to(device)
@@ -154,12 +153,12 @@ def main():
         model=model,
         tokenizer=tokenizer,
         prompt=args.prompt,
+        context_length=model_config["context_length"],
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
         stop_token=args.stop_token,
         device=device,
-        context_length=model_config["context_length"],
     )
 
     print("\n" + "=" * 50)
