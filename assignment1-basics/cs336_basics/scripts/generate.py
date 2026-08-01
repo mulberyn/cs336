@@ -1,6 +1,7 @@
 import torch
 import argparse
 import sys
+from tqdm import tqdm
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.modules import TransformerLM, softmax
@@ -71,33 +72,40 @@ def generate(
     top_p: float,
     stop_token: str,
     device,
+    context_length: int
 ) -> str:
     input_ids = tokenizer.encode(prompt)
     input_tensor = torch.Tensor([input_ids], device=device) # input_tensor (1, seq_len)
     eos_token_id = tokenizer.encode(stop_token)
-    model.eval()
     
-    for _ in range(max_new_tokens):
-        logits = model(input_tensor) # logits (1, seq_len, vocab_size)
-        # 取出最后一个单词（也就是预测的下一个词）的全部概率
-        next_logits = logits[0, -1, :] 
-        # 引入温度
-        probs = temperature_softmax(next_logits, temperature)
-        # 引入 top_p
-        if top_p < 1.0:
-            next_id = sample_top_p(probs, top_p)
-        else:
-            next_id = torch.multinomial(probs, 1)
-        # 如果遇到结束标记，那么截止
-        if next_id == eos_token_id:
-            break
-        # 更新全部文本
-        input_ids.append(next_id)
-        # 更新 input_tensor
-        next_tensor = torch.tensor([[next_id]], device=device)
-        input_tensor = torch.cat([input_tensor, next_tensor], dim=1)
+    model.eval()
+    with torch.no_grad():
+        for _ in tqdm(range(max_new_tokens), desc="生成中"):
+            logits = model(input_tensor) # logits (1, seq_len, vocab_size)
+            # 取出最后一个单词（也就是预测的下一个词）的全部概率
+            next_logits = logits[0, -1, :] 
+            # 引入温度
+            probs = temperature_softmax(next_logits, temperature)
+            # 引入 top_p
+            if top_p < 1.0:
+                next_id = sample_top_p(probs, top_p)
+            else:
+                next_id = torch.multinomial(probs, 1)
+            # 如果遇到结束标记，那么截止
+            if next_id == eos_token_id:
+                break
+            # 更新全部文本
+            input_ids.append(next_id)
+            # 更新 input_tensor
+            next_tensor = torch.tensor([[next_id]], device=device)
+            input_tensor = torch.cat([input_tensor, next_tensor], dim=1)
+            
+            # 防止序列超过模型的最大上下文长度（截断最前面的 token）
+            if input_tensor.size(1) > context_length:
+                input_tensor = input_tensor[:, -context_length:]
     
     return tokenizer.decode(input_ids)
+
 
 def main():
     args = load_parse()
@@ -135,6 +143,7 @@ def main():
         rope_theta=model_config["rope_theta"],
         device=device,
         dtype=None,          # 默认 float32
+        context_length=model_config["context_length"],
     )
     model.load_state_dict(state_dict, strict=True)
     model.to(device)
