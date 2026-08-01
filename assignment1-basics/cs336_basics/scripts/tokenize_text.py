@@ -7,8 +7,8 @@ import sys
 from cs336_basics.tokenizer import Tokenizer
 
 DEFAULT_CONFIG = {
-    'input_path': "./data/TinyStoriesV2-GPT4-valid.txt",
-    'output_path': './data/TinyStoriesV2-GPT4-valid.bin',
+    'input_path': "./data/TinyStoriesV2-GPT4-train.txt",
+    'output_path': './data/TinyStoriesV2-GPT4-train.bin',
     'tokenizer_dir': "./out/tokenizer",
 }
 
