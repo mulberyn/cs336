@@ -21,3 +21,4 @@
 
 # Weights & Biases logs
 wandb/
+**/checkpoints

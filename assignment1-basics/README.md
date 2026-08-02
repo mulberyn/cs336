@@ -157,3 +157,52 @@ uv run python cs336_basics/scripts/generate.py
 | `--top_p`          | `0.9`                        | Top-p 截断（`1.0` 表示不使用）  |
 | `--stop_token`     | `<\|endoftext\|>`            | 遇到该 token 停止生成           |
 | `--device`         | `auto`                       | `auto` / `cpu` / `cuda` / `mps` |
+
+## 消融实验（Ablation Studies）
+
+以第 3 步的标准 Transformer（pre-norm + RoPE + SwiGLU）为基线，做 4 组消融实验，验证各组件对训练稳定性与最终性能的贡献。所有实验共享 `cs336_basics/experiments/common.py`（内含 `BASE_CONFIG`、通用模型 `AblationTransformer`、训练入口 `run()`），每个实验文件只声明与基线不同的配置键。
+
+### 4 组实验
+
+| 实验 | 文件 | 相对基线的改动 | 目的 |
+| --- | --- | --- | --- |
+| experiment1 | `nonorm.py` | `use_rmsnorm=False` | 移除全部 RMSNorm |
+| experiment2 | `post_norm.py` | `norm_position="post"` | pre-norm 改为 post-norm |
+| experiment3 | `nope.py` | `use_rope=False` | 移除 RoPE 位置编码 |
+| experiment4 | `silu_ffn.py` | `ffn_type="silu"`，`d_ff=2048` | SwiGLU 改为无门控 SiLU |
+
+### 操作流程
+
+全部命令在 **`assignment1-basics/`** 目录下执行：
+
+```sh
+# 逐个运行（也可只跑其中一个）
+uv run python cs336_basics/experiments/nonorm.py
+uv run python cs336_basics/experiments/post_norm.py
+uv run python cs336_basics/experiments/nope.py
+uv run python cs336_basics/experiments/silu_ffn.py
+```
+
+**输出**：
+
+- 训练/验证指标曲线：记录到 W&B（默认 `project=cs336-transformer`）；如需关闭，把对应实验文件或 `BASE_CONFIG` 中的 `no_wandb` 改为 `True`
+- checkpoint：`./checkpoints/<实验名>/`
+- 最终模型：`./out/model/model_<实验名>.pt`
+
+**配置说明**：基线超参数与消融开关都在 `common.py` 的 `BASE_CONFIG` 里，四个开关为 `use_rmsnorm`、`norm_position`（`"pre"`/`"post"`）、`use_rope`、`ffn_type`（`"swiglu"`/`"silu"`）。每个实验文件用 `config.update({...})` 只覆盖要改的键。
+
+**快速验证**：想先确认某个实验能跑通，可临时把 `train_steps` 改为 `2` 并设置 `no_wandb=True`，跑通后再放开。
+
+### 预测实验结果
+
+> 以下为基于文献与工程经验的**预测（假设）**，最终结果以实际运行为准。建议运行后把实测数值填进下表。
+
+| 实验 | 预测表现 | 理由 |
+| --- | --- | --- |
+| 基线（pre-norm + RoPE + SwiGLU） | 训练稳定，loss 最低或接近最低 | 现代 LLM 的主流配置，最成熟稳定 |
+| experiment1 无 RMSNorm | 训练明显不稳定，loss 显著高于基线；易梯度爆炸，需降 LR（已设为 `3e-4`） | RMSNorm 维持各层激活尺度，是深层网络收敛的基石 |
+| experiment2 post-norm | 可训练但收敛更慢/更不稳，最终 loss 可能高于基线 | pre-norm 在残差路径上梯度更通畅，post-norm 在大规模下更难训（GPT-2 以来的经验） |
+| experiment3 无 RoPE | loss 显著高于基线，且序列越长恶化越明显 | 模型无法感知 token 位置，而语言建模高度依赖位置信息 |
+| experiment4 无门控 SiLU | 能正常训练，最终 loss 略高于基线 | SwiGLU 的门控（`×σ(W3x)`）有特征过滤作用；两者参数量基本匹配（各约 1650 万） |
+
+> 注：experiment1 单独调低了学习率，严格对比时需把该超参数差异也纳入考量。
