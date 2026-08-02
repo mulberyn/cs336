@@ -119,6 +119,17 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
+def get_device(device_arg):
+    if device_arg == 'auto':
+        if torch.cuda.is_available():
+            return 'cuda'
+        elif torch.backends.mps.is_available():
+            return 'mps'
+        else:
+            return 'cpu'
+    return device_arg
+
+
 def evaluate(model, dataset, batch_size, context_length, device, num_batches):
     model.eval()
     total_loss = 0.0
@@ -140,10 +151,7 @@ def main():
     set_seed(args.seed)
     
     # ========== 设备设定 ==========
-    if args.device == 'auto':
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        device = torch.device(args.device)
+    device = get_device(args.device)
     
     # ========== 加载数据 ==========
     train_data = np.memmap(args.train_data_path, dtype=np.uint32)
