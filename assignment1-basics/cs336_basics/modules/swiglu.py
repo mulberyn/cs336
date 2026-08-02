@@ -81,5 +81,24 @@ class SwiGLU(nn.Module):
             torch.Tensor: 输出张量，形状为 (..., d_model)，与输入形状相同（仅最后一维不变）。
         """
         # 公式：W2 * (SiLU(W1 * x) ⊙ (W3 * x))
-        # F.silu 是 PyTorch 提供的 SiLU 实现，数值稳定且高效
         return self.w2(silu(self.w1(x)) * self.w3(x))
+    
+
+class SiLU(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        if d_ff is None:
+            d_ff = int(4 * d_model)
+            d_ff = ((d_ff + 63) // 64) * 64
+        self.w1 = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(in_features=d_ff, out_features=d_model, device=device, dtype=dtype)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(silu(self.w1(x)))

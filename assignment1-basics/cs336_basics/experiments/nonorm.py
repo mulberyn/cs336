@@ -6,6 +6,49 @@ from cs336_basics.modules import (
 )
 from cs336_basics.trainer import *
 
+DEFAULT_CONFIG = {
+    # 模型配置
+    'vocab_size': 10000,
+    'context_length': 256,
+    'd_model': 512,
+    'num_layers': 4,
+    'd_ff': 1344,
+    'num_heads': 16,
+    'rope_theta': 10000.0,
+    
+    # 优化器配置
+    'lr_max': 1e-3,
+    'lr_min': 1e-4,
+    't_warm': 500,
+    't_end': 10000,
+    'weight_decay': 1e-2,
+    'beta1': 0.9,
+    'beta2': 0.95,
+    'eps': 1e-8,
+    'max_l2_norm': 1.0,
+    
+    # 训练配置
+    'batch_size': 32,
+    'train_steps': 6000,
+    'val_interval': 100,
+    'val_batch': 10,
+    'save_intervals': 1000,
+    'log_intervals': 1,
+    'save_ckp_path': './checkpoints/nonorm',
+    'resume_ckp': None,
+    'seed': 42, 
+    
+    # 数据配置
+    'train_data_path': './data/TinyStoriesV2-GPT4-train.bin',
+    'valid_data_path': './data/TinyStoriesV2-GPT4-valid.bin',
+    'device': 'auto',
+    
+    # 记录配置
+    'wandb_project': 'cs336-transformer',
+    'wandb_run_name': 'experiment1.no-RMSnorm',
+    'no_wandb': False,
+    'export_final': './out/model/model_nonorm.pt',   # 最终模型导出路径
+}
 class TransformerBlockNoNorm(nn.Module):
     def __init__(
         self,
@@ -92,59 +135,44 @@ class TransformerLMNoNorm(nn.Module):
         x = self.output_norm(x)  # (batch, seq_len, d_model)
         x = self.output_embedding(x)  # (batch, seq_len, vocab_size)
         return x
-
-
-DEFAULT_CONFIG = {
-    # 模型配置
-    'vocab_size': 10000,
-    'context_length': 256,
-    'd_model': 512,
-    'num_layers': 4,
-    'd_ff': 1344,
-    'num_heads': 16,
-    'rope_theta': 10000.0,
     
-    # 优化器配置
-    'lr_max': 1e-3,
-    'lr_min': 1e-4,
-    't_warm': 500,
-    't_end': 10000,
-    'weight_decay': 1e-2,
-    'beta1': 0.9,
-    'beta2': 0.95,
-    'eps': 1e-8,
-    'max_l2_norm': 1.0,
-    
-    # 训练配置
-    'batch_size': 32,
-    'train_steps': 6000,
-    'val_interval': 100,
-    'val_batch': 10,
-    'save_intervals': 1000,
-    'log_intervals': 1,
-    'save_ckp_path': './checkpoints/nonorm',
-    'resume_ckp': None,
-    'seed': 42, 
-    
-    # 数据配置
-    'train_data_path': './data/TinyStoriesV2-GPT4-train.bin',
-    'valid_data_path': './data/TinyStoriesV2-GPT4-valid.bin',
-    'device': 'auto',
-    
-    # 记录配置
-    'wandb_project': 'cs336-transformer',
-    'wandb_run_name': 'experiment1.no-RMSnorm',
-    'no_wandb': False,
-    'export_final': './out/model/model_nonorm.pt',   # 最终模型导出路径
-}
-
 import random
 import wandb
 import math
 import os
 from tqdm import tqdm
 import numpy as np
-from scripts.train_model import get_device, set_seed, evaluate
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def get_device(device_arg):
+    if device_arg == 'auto':
+        if torch.cuda.is_available():
+            return 'cuda'
+        elif torch.backends.mps.is_available():
+            return 'mps'
+        else:
+            return 'cpu'
+    return device_arg
+
+
+def evaluate(model, dataset, batch_size, context_length, device, num_batches):
+    model.eval()
+    total_loss = 0.0
+    with torch.no_grad():
+        for _ in range(num_batches):
+            inputs, targets = data_loading(dataset, batch_size, context_length, device)
+            logits = model(inputs)
+            loss = cross_entropy(logits, targets)
+            total_loss += loss.item()
+    model.train()
+    return total_loss / num_batches
 
 
 if __name__ == "__main__":

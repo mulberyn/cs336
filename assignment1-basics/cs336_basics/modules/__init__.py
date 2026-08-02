@@ -7,7 +7,7 @@ from .rmsnorm import RMSNorm
 from .rope import RoPE
 from .scaled_dot_product_attention import scaled_dot_product_attention
 from .softmax import softmax
-from .swiglu import silu, SwiGLU
+from .swiglu import silu, SwiGLU, SiLU
 from .transformer import (
     TransformerBlock,
     TransformerLM
@@ -23,6 +23,7 @@ __all__ = [
     "softmax",
     "silu",
     "SwiGLU",
+    "SiLU"
     "TransformerBlock",
     "TransformerLM"
 ]
