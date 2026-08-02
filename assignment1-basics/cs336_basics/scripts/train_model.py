@@ -242,10 +242,12 @@ def main():
         # ========== 日志记录（每 log_intervals 步） ==========
         if (step + 1) % args.log_intervals == 0:
             perplexity = math.exp(loss.item())
-            # 计算吞吐量（需要记录时间）
-            # tokens_per_sec = (batch_size * context_length) / elapsed_time
-            # 这里假设你已经计算了 elapsed_time
-            print(f"Step {step + 1}/{args.train_steps} | loss={loss.item():.4f} | ppl={perplexity:.2f} | lr={lr:.2e} | grad_norm={grad_norm:.2f}")
+            pbar.set_postfix({
+                "loss": f"{loss.item():.4f}",
+                "ppl": f"{perplexity:.2f}",
+                "lr": f"{lr:.2e}",
+                "grad": f"{grad_norm:.2f}",
+            })
             if not args.no_wandb:
                 wandb.log({
                     "train/loss": loss.item(),
@@ -259,7 +261,7 @@ def main():
         if (step + 1) % args.val_interval == 0:
             val_loss = evaluate(model, val_data, args.batch_size, args.context_length, device, args.val_batch)
             val_ppl = math.exp(val_loss)
-            print(f"Step {step+1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
+            print(f"\nStep {step + 1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
             if not args.no_wandb:
                 wandb.log({
                     "valid/loss": val_loss,

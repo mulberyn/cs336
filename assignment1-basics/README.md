@@ -109,7 +109,7 @@ uv run python cs336_basics/scripts/tokenize_text.py \
 uv run python cs336_basics/scripts/train_model.py
 ```
 
-默认参数（按配置分组）：
+默认参数（按配置分组）：（按照以下参数配置，在 3060 笔记本上约需要 30 到 40 分钟）
 
 | 参数                                      | 默认值                                               | 说明                            |
 | ----------------------------------------- | ---------------------------------------------------- | ------------------------------- |
@@ -164,12 +164,12 @@ uv run python cs336_basics/scripts/generate.py
 
 ### 4 组实验
 
-| 实验 | 文件 | 相对基线的改动 | 目的 |
-| --- | --- | --- | --- |
-| experiment1 | `nonorm.py` | `use_rmsnorm=False` | 移除全部 RMSNorm |
-| experiment2 | `post_norm.py` | `norm_position="post"` | pre-norm 改为 post-norm |
-| experiment3 | `nope.py` | `use_rope=False` | 移除 RoPE 位置编码 |
-| experiment4 | `silu_ffn.py` | `ffn_type="silu"`，`d_ff=2048` | SwiGLU 改为无门控 SiLU |
+| 实验        | 文件           | 相对基线的改动                 | 目的                    |
+| ----------- | -------------- | ------------------------------ | ----------------------- |
+| experiment1 | `nonorm.py`    | `use_rmsnorm=False`            | 移除全部 RMSNorm        |
+| experiment2 | `post_norm.py` | `norm_position="post"`         | pre-norm 改为 post-norm |
+| experiment3 | `nope.py`      | `use_rope=False`               | 移除 RoPE 位置编码      |
+| experiment4 | `silu_ffn.py`  | `ffn_type="silu"`，`d_ff=2048` | SwiGLU 改为无门控 SiLU  |
 
 ### 操作流程
 
@@ -197,12 +197,12 @@ uv run python cs336_basics/experiments/silu_ffn.py
 
 > 以下为基于文献与工程经验的**预测（假设）**，最终结果以实际运行为准。建议运行后把实测数值填进下表。
 
-| 实验 | 预测表现 | 理由 |
-| --- | --- | --- |
-| 基线（pre-norm + RoPE + SwiGLU） | 训练稳定，loss 最低或接近最低 | 现代 LLM 的主流配置，最成熟稳定 |
-| experiment1 无 RMSNorm | 训练明显不稳定，loss 显著高于基线；易梯度爆炸，需降 LR（已设为 `3e-4`） | RMSNorm 维持各层激活尺度，是深层网络收敛的基石 |
-| experiment2 post-norm | 可训练但收敛更慢/更不稳，最终 loss 可能高于基线 | pre-norm 在残差路径上梯度更通畅，post-norm 在大规模下更难训（GPT-2 以来的经验） |
-| experiment3 无 RoPE | loss 显著高于基线，且序列越长恶化越明显 | 模型无法感知 token 位置，而语言建模高度依赖位置信息 |
-| experiment4 无门控 SiLU | 能正常训练，最终 loss 略高于基线 | SwiGLU 的门控（`×σ(W3x)`）有特征过滤作用；两者参数量基本匹配（各约 1650 万） |
+| 实验                             | 预测表现                                                                | 理由                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 基线（pre-norm + RoPE + SwiGLU） | 训练稳定，loss 最低或接近最低                                           | 现代 LLM 的主流配置，最成熟稳定                                                 |
+| experiment1 无 RMSNorm           | 训练明显不稳定，loss 显著高于基线；易梯度爆炸，需降 LR（已设为 `3e-4`） | RMSNorm 维持各层激活尺度，是深层网络收敛的基石                                  |
+| experiment2 post-norm            | 可训练但收敛更慢/更不稳，最终 loss 可能高于基线                         | pre-norm 在残差路径上梯度更通畅，post-norm 在大规模下更难训（GPT-2 以来的经验） |
+| experiment3 无 RoPE              | loss 显著高于基线，且序列越长恶化越明显                                 | 模型无法感知 token 位置，而语言建模高度依赖位置信息                             |
+| experiment4 无门控 SiLU          | 能正常训练，最终 loss 略高于基线                                        | SwiGLU 的门控（`×σ(W3x)`）有特征过滤作用；两者参数量基本匹配（各约 1650 万）    |
 
-> 注：experiment1 单独调低了学习率，严格对比时需把该超参数差异也纳入考量。
+> 注：experiment1 为了保证实验不中断，单独调低了学习率（不降低时在 1000 步以内出现爆炸），严格对比时需把该超参数差异也纳入考量。

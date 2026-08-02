@@ -345,7 +345,7 @@ def run(config) -> None:
                 config["context_length"], device, config["val_batch"]
             )
             val_ppl = math.exp(val_loss)
-            print(f"Step {step + 1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
+            print(f"\nStep {step + 1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
             if not config["no_wandb"]:
                 wandb.log({
                     "valid/loss": val_loss,
