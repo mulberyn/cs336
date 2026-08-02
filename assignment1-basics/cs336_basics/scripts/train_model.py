@@ -196,21 +196,15 @@ def main():
     init_val_loss = evaluate(model, val_data, args.batch_size, args.context_length, device, args.val_batch)
     print(f"初始验证损失: {init_val_loss:.4f}")
     if not args.no_wandb:
-        wandb.log({"val/loss": init_val_loss, "val/perplexity": math.exp(init_val_loss), "step": 0})
+        wandb.log({"valid/loss": init_val_loss, "valid/perplexity": math.exp(init_val_loss), "step": 0})
         
     # ========== 开始训练 ==========
+    model.train()
     pbar = tqdm(range(start_step, args.train_steps), 
                 desc="Training", 
                 initial=start_step, 
                 total=args.train_steps)
     for step in pbar:
-        # ========== 更新学习率 ==========
-        lr = get_lr_cosine_schedule(
-            step + 1, args.lr_max, args.lr_min, args.t_warm, args.t_end
-        )
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
-        
         # ========== 获取当前批次 ==========
         inputs, targets = data_loading(train_data, args.batch_size, args.context_length, device)
         inputs = inputs.long().to(device)
@@ -220,13 +214,20 @@ def main():
         logits = model(inputs)
         loss = cross_entropy(logits, targets)
         
-        # ========== 反向传播（梯度清零、优化器反向传播） ==========
+        # ========== 反向传播（梯度清零、梯度反向传播） ==========
         optimizer.zero_grad()
         loss.backward()
         
         # ========== 梯度裁剪（并获取 l2 范数） ==========
         grad_norm = gradient_clipping(model.parameters(), args.max_l2_norm)
-            
+        
+        # ========== 更新学习率 ==========
+        lr = get_lr_cosine_schedule(
+            step + 1, args.lr_max, args.lr_min, args.t_warm, args.t_end
+        )
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+        
         # ========== 优化器更新 ==========
         optimizer.step()
             
@@ -253,12 +254,12 @@ def main():
             print(f"Step {step+1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
             if not args.no_wandb:
                 wandb.log({
-                    "val/loss": val_loss,
-                    "val/perplexity": val_ppl,
+                    "valid/loss": val_loss,
+                    "valid/perplexity": val_ppl,
                     "step": step + 1,
                 })
         
-        # ========== 验证（每 val_interval 步） ==========
+        # ========== 保存（每 val_interval 步） ==========
         if (step + 1) % args.save_intervals == 0:
             ckpt_path = os.path.join(args.save_ckp_path, f"checkpoint_{step+1:08d}.pt")
             os.makedirs(args.save_ckp_path, exist_ok=True)
