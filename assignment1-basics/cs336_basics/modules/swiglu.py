@@ -1,9 +1,14 @@
 import torch
 from torch import nn
 from .linear import Linear
-import torch.nn.functional as F
 
 
+def silu(
+    x: torch.Tensor
+) -> torch.Tensor:
+    return x / (torch.exp(-x) + 1)
+    
+    
 class SwiGLU(nn.Module):
     """
     SwiGLU 前馈网络模块（SwiGLU Feed-Forward Network）。
@@ -77,4 +82,4 @@ class SwiGLU(nn.Module):
         """
         # 公式：W2 * (SiLU(W1 * x) ⊙ (W3 * x))
         # F.silu 是 PyTorch 提供的 SiLU 实现，数值稳定且高效
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+        return self.w2(silu(self.w1(x)) * self.w3(x))

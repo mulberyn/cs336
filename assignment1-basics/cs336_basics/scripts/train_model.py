@@ -162,8 +162,6 @@ def main():
         num_heads=args.num_heads,
         d_ff=args.d_ff,
         rope_theta=args.rope_theta,
-        device=device,
-        dtype=torch.float32,
     ).to(device)
     
     # ========== 构建优化器 ==========
@@ -198,7 +196,7 @@ def main():
     init_val_loss = evaluate(model, val_data, args.batch_size, args.context_length, device, args.val_batch)
     print(f"初始验证损失: {init_val_loss:.4f}")
     if not args.no_wandb:
-        wandb.log({"val_loss": init_val_loss, "val_perplexity": math.exp(init_val_loss), "step": 0})
+        wandb.log({"val/loss": init_val_loss, "val/perplexity": math.exp(init_val_loss), "step": 0})
         
     # ========== 开始训练 ==========
     pbar = tqdm(range(start_step, args.train_steps), 
@@ -206,8 +204,17 @@ def main():
                 initial=start_step, 
                 total=args.train_steps)
     for step in pbar:
+        # ========== 更新学习率 ==========
+        lr = get_lr_cosine_schedule(
+            step + 1, args.lr_max, args.lr_min, args.t_warm, args.t_end
+        )
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+        
         # ========== 获取当前批次 ==========
         inputs, targets = data_loading(train_data, args.batch_size, args.context_length, device)
+        inputs = inputs.long().to(device)
+        targets = targets.long().to(device)
         
         # ========== 前向传播（输出 logits，计算 loss） ==========
         logits = model(inputs)
@@ -217,18 +224,11 @@ def main():
         optimizer.zero_grad()
         loss.backward()
         
-        # ========== 梯度裁剪（并获取范数） ==========
+        # ========== 梯度裁剪（并获取 l2 范数） ==========
         grad_norm = gradient_clipping(model.parameters(), args.max_l2_norm)
-        
+            
         # ========== 优化器更新 ==========
         optimizer.step()
-        
-        # ========== 更新学习率 ==========
-        lr = get_lr_cosine_schedule(
-            step + 1, args.lr_max, args.lr_min, args.t_warm, args.t_end
-        )
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
             
         # ========== 日志记录（每 log_intervals 步） ==========
         if (step + 1) % args.log_intervals == 0:
@@ -239,10 +239,10 @@ def main():
             print(f"Step {step + 1}/{args.train_steps} | loss={loss.item():.4f} | ppl={perplexity:.2f} | lr={lr:.2e} | grad_norm={grad_norm:.2f}")
             if not args.no_wandb:
                 wandb.log({
-                    "loss": loss.item(),
-                    "perplexity": perplexity,
-                    "learning_rate": lr,
-                    "grad_norm": grad_norm,
+                    "train/loss": loss.item(),
+                    "train/perplexity": perplexity,
+                    "train/learning_rate": lr,
+                    "train/grad_norm": grad_norm,
                     "step": step + 1,
                 })
         
@@ -253,8 +253,8 @@ def main():
             print(f"Step {step+1} | Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f}")
             if not args.no_wandb:
                 wandb.log({
-                    "val_loss": val_loss,
-                    "val_perplexity": val_ppl,
+                    "val/loss": val_loss,
+                    "val/perplexity": val_ppl,
                     "step": step + 1,
                 })
         
@@ -288,7 +288,7 @@ def main():
     torch.save(export_dict, export_path)
     print(f"最终模型已保存至 {export_path}")
 
-    # ========== 12. 将最终模型上传到 W&B（作为 artifact） ==========
+    # ========== 将最终模型上传到 W&B（作为 artifact） ==========
     if not args.no_wandb:
         artifact = wandb.Artifact(name=f"model-{wandb.run.id}", type="model")
         artifact.add_file(export_path)
