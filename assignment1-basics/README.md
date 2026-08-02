@@ -206,3 +206,23 @@ uv run python cs336_basics/experiments/silu_ffn.py
 | experiment4 无门控 SiLU          | 能正常训练，最终 loss 略高于基线                                        | SwiGLU 的门控（`×σ(W3x)`）有特征过滤作用；两者参数量基本匹配（各约 1650 万）    |
 
 > 注：experiment1 为了保证实验不中断，单独调低了学习率（不降低时在 1000 步以内出现爆炸），严格对比时需把该超参数差异也纳入考量。
+
+### 实验结果（实测）
+
+基线 + 4 组消融共 5 个模型的训练/验证曲线如下：
+
+**训练损失**
+
+![训练损失](./pics/train_loss.png)
+
+**训练困惑度**
+
+![训练困惑度](./pics/train_ppl.png)
+
+**验证损失**
+
+![验证损失](./pics/valid_loss.png)
+
+**验证困惑度**
+
+![验证困惑度](./pics/valid_ppl.png)
