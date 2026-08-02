@@ -202,7 +202,7 @@ if __name__ == "__main__":
         wandb.init(
             project=DEFAULT_CONFIG['wandb_project'],
             name=DEFAULT_CONFIG['wandb_run_name'],
-            config=vars(DEFAULT_CONFIG),
+            config=DEFAULT_CONFIG,
         )
         wandb.define_metric("step")
         wandb.define_metric("*", step_metric="step")

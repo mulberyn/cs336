@@ -23,7 +23,7 @@ __all__ = [
     "softmax",
     "silu",
     "SwiGLU",
-    "SiLU"
+    "SiLU",
     "TransformerBlock",
     "TransformerLM"
 ]
