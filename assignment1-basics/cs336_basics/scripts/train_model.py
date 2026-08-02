@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
     'log_intervals': 1,
     'save_ckp_path': './checkpoints',
     'resume_ckp': None,
-    'seed': random.randint(0, int(1e9)), 
+    'seed': 42, 
     
     # 数据配置
     'train_data_path': './data/TinyStoriesV2-GPT4-train.bin',
