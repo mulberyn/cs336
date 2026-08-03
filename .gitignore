@@ -22,3 +22,5 @@
 # Weights & Biases logs
 wandb/
 **/checkpoints
+.claude
+.pytest_cache
