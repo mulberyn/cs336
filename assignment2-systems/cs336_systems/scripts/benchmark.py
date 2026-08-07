@@ -53,19 +53,13 @@ def benchmark_step(model, optimizer, inputs, targets, mode: str, device: str):
         'full' : 前向 + 损失 + 反向 + 优化器更新
     """
     optimizer.zero_grad(set_to_none=True)
-    
-    # 前向传播
-    logits = model(inputs)                     # shape: (batch, seq_len, vocab_size)
-    
+    logits = model(inputs)
     if mode == 'forward':
         return
-    
     loss = cross_entropy(logits, targets)
-    
     if mode == 'forward_backward':
         loss.backward()
         return
-    
     if mode == 'full':
         loss.backward()
         optimizer.step()
@@ -105,6 +99,7 @@ def main(configs: dict) -> int:
         benchmark_step(model, optimizer, inputs, targets, mode, device)
         torch.cuda.synchronize() if device == 'cuda' else None
     
+    torch.cuda.memory._record_memory_history(max_entries=1000000) if device == 'cuda' else None
     timings = []
     timer = timeit.default_timer
     print(f"\nMeasuring {it_n} steps...")
@@ -122,8 +117,10 @@ def main(configs: dict) -> int:
         if verbose:
             print(f"  Step {step_idx+1:3d}/{it_n}: {elapsed*1000:8.3f} ms")
     
-    timings_ms = np.array(timings) * 1000
+    torch.cuda.memory._dump_snapshot("memory_snapshot.pickle") if device == 'cuda' else None
+    torch.cuda.memory._record_memory_history(enabled=None) if device == 'cuda' else None
     
+    timings_ms = np.array(timings) * 1000
     mean = np.mean(timings_ms)
     std = np.std(timings_ms, ddof=1)
     min_val = np.min(timings_ms)
@@ -132,7 +129,6 @@ def main(configs: dict) -> int:
     p95 = np.percentile(timings_ms, 95)
     p99 = np.percentile(timings_ms, 99)
     
-    # 打印汇总
     print("\n" + "="*50)
     print(f"Mode: {mode}")
     print(f"Warmup steps: {it_warm}, Measurement steps: {it_n}")
