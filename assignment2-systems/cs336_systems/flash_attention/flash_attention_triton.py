@@ -16,20 +16,21 @@ def flash_fwd_kernel(
     D: tl.constexpr,
     Q_TILE_SIZE: tl.constexpr,
     K_TILE_SIZE: tl.constexpr,
+    is_causal: tl.constexpr,
 ):
     """
-    FlashAttention-2 forward kernel.
-    Each instance handles one batch and one query tile.
+    FlashAttention-2 forward kernel with optional causal masking.
     """
     query_tile_index = tl.program_id(0)
     batch_index = tl.program_id(1)
 
     # 1) Load Q tile (once per kernel)
+    q_start = query_tile_index * Q_TILE_SIZE
     Q_block_ptr = tl.make_block_ptr(
         base=Q_ptr + batch_index * stride_qb,
         shape=(N_QUERIES, D),
         strides=(stride_qq, stride_qd),
-        offsets=(query_tile_index * Q_TILE_SIZE, 0),
+        offsets=(q_start, 0),
         block_shape=(Q_TILE_SIZE, D),
         order=(1, 0),
     )
@@ -66,8 +67,16 @@ def flash_fwd_kernel(
         v = tl.load(V_block_ptr)   # (K_TILE_SIZE, D)
 
         # Compute S = Q @ K^T * scale
-        # q: (Q_TILE_SIZE, D), k: (K_TILE_SIZE, D)
         s = tl.dot(q, tl.trans(k)) * scale   # (Q_TILE_SIZE, K_TILE_SIZE)
+
+        # Apply causal mask if needed
+        if is_causal:
+            # Create index vectors
+            q_idx = q_start + tl.arange(0, Q_TILE_SIZE)[:, None]
+            k_idx = k_offset + tl.arange(0, K_TILE_SIZE)[None, :]
+            mask = q_idx < k_idx  # future positions to mask
+            # Add large negative number to masked positions
+            s = tl.where(mask, -1e6, s)
 
         # Row-wise max and softmax numerator
         m_ij = tl.max(s, axis=1)             # (Q_TILE_SIZE,)
@@ -102,7 +111,7 @@ def flash_fwd_kernel(
         base=O_ptr + batch_index * stride_ob,
         shape=(N_QUERIES, D),
         strides=(stride_oq, stride_od),
-        offsets=(query_tile_index * Q_TILE_SIZE, 0),
+        offsets=(q_start, 0),
         block_shape=(Q_TILE_SIZE, D),
         order=(1, 0),
     )
@@ -113,21 +122,21 @@ def flash_fwd_kernel(
         base=L_ptr + batch_index * stride_lb,
         shape=(N_QUERIES,),
         strides=(stride_lq,),
-        offsets=(query_tile_index * Q_TILE_SIZE,),
+        offsets=(q_start,),
         block_shape=(Q_TILE_SIZE,),
         order=(0,),
     )
     tl.store(L_block_ptr, L_i)
 
 
-class FlashAttentionTritonFunction(torch.autograd.Function):
+class FlashAttentionTriton(torch.autograd.Function):
     """
     Autograd Function that wraps the Triton kernel for FlashAttention-2 forward pass.
-    Backward is not implemented.
+    Supports causal masking via the is_causal flag (default False).
     """
     @staticmethod
     def forward(ctx, Q, K, V, is_causal=False):
-        # Support both 2D (seq_len, head_dim) and 3D (batch, seq_len, head_dim) inputs
+        # Support both 2D and 3D inputs
         original_shape_Q = Q.shape
         if Q.ndim == 2:
             Q = Q.unsqueeze(0)
@@ -152,9 +161,9 @@ class FlashAttentionTritonFunction(torch.autograd.Function):
         stride_ob, stride_oq, stride_od = O.stride()
         stride_lb, stride_lq = L.stride()
 
-        # Tile sizes (must be at least 16)
-        Q_TILE_SIZE = 32
-        K_TILE_SIZE = 32
+        # Tile sizes (at least 16, choose 16 for compatibility with powers of two)
+        Q_TILE_SIZE = 16
+        K_TILE_SIZE = 16
 
         # Grid: (number of query tiles, batch size)
         grid = (N_QUERIES // Q_TILE_SIZE, batch_size)
@@ -162,7 +171,7 @@ class FlashAttentionTritonFunction(torch.autograd.Function):
         # Scale factor: 1 / sqrt(head_dim)
         scale = 1.0 / (D ** 0.5)
 
-        # Launch kernel
+        # Launch kernel with is_causal as constexpr
         flash_fwd_kernel[grid](
             Q, K, V, O, L,
             stride_qb, stride_qq, stride_qd,
@@ -173,6 +182,7 @@ class FlashAttentionTritonFunction(torch.autograd.Function):
             N_QUERIES, N_KEYS,
             scale,
             D, Q_TILE_SIZE, K_TILE_SIZE,
+            is_causal=is_causal,
         )
 
         # Restore original shape if input was 2D
@@ -180,8 +190,9 @@ class FlashAttentionTritonFunction(torch.autograd.Function):
             O = O.squeeze(0)
             L = L.squeeze(0)
 
-        # Save for backward (though not used)
+        # Save for backward (including mask flag)
         ctx.save_for_backward(Q, K, V, O, L)
+        ctx.is_causal = is_causal
         return O
 
     @staticmethod
