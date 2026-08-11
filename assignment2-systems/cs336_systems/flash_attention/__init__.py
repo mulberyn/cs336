@@ -1,5 +1,5 @@
-from .flash_attention_pytorch import FlashAttentionPytorch
-from .flash_attention_triton import FlashAttentionTriton
+from .flash_attn_pytorch import FlashAttentionPytorch
+from .flash_attn_triton import FlashAttentionTriton
 
 __all__ = [
     "FlashAttentionPytorch",
