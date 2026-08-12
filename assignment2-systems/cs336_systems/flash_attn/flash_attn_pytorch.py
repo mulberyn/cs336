@@ -1,86 +1,128 @@
+import math
 import torch
 
+
 class FlashAttentionPytorch(torch.autograd.Function):
-    """
-    纯 PyTorch 实现的 FlashAttention‑2 前向传播（支持 batch 维度）。
-    忽略 is_causal 标志，块大小 Br = Bc = 32（≥16）。
-    保存 Q, K, V, O 以及 logsumexp L（形状与 Q 的 batch 维度和序列长度一致）供反向传播使用。
-    """
     @staticmethod
     def forward(ctx, Q, K, V, is_causal=False):
-        # 获取原始形状，支持任意 batch 维度
-        original_shape_Q = Q.shape
-        if Q.ndim < 2:
-            raise ValueError("Q must have at least 2 dimensions")
+        """
+        Q, K, V: (..., seq_len, d)  任意前导 batch 维度
+        返回 O: (..., seq_len, d)
+        同时把 L (logsumexp), Q, K, V, O 存入 ctx 供 backward 使用
+        """
+        *batch_dims, Nq, d = Q.shape
+        Nk = K.shape[-2]
+        scale = 1.0 / math.sqrt(d)
 
-        # 提取最后两维 (N, d)，其余为 batch 维度
-        *batch_dims, N, d = original_shape_Q
+        # 选择 tile 大小，至少 16x16，且能整除序列长度（题目保证是2的幂且>=16）
+        def pick_tile(n):
+            for cand in (128, 64, 32, 16):
+                if n % cand == 0:
+                    return cand
+            return 16
 
-        # 展平 batch 维度为第一维
-        Q_flat = Q.view(-1, N, d)
-        K_flat = K.view(-1, K.shape[-2], K.shape[-1])
-        V_flat = V.view(-1, V.shape[-2], V.shape[-1])
-        B = Q_flat.shape[0]
-        assert K_flat.shape[0] == B and V_flat.shape[0] == B
+        Bq = pick_tile(Nq)
+        Bk = pick_tile(Nk)
 
-        O_flat = torch.zeros_like(Q_flat)
-        L_flat = torch.zeros(B, N, device=Q.device, dtype=Q.dtype)
+        # 把所有 batch 维度 flatten 成一维，方便循环处理
+        Q_ = Q.reshape(-1, Nq, d)
+        K_ = K.reshape(-1, Nk, d)
+        V_ = V.reshape(-1, Nk, d)
+        B = Q_.shape[0]
 
-        Br = 32
-        Bc = 32
+        O = torch.empty_like(Q_)
+        L = torch.empty(B, Nq, device=Q.device, dtype=Q.dtype)
 
-        for b in range(B):
-            Qb = Q_flat[b]          # (N, d)
-            Kb = K_flat[b]
-            Vb = V_flat[b]
-            M = Kb.shape[0]         # 序列长度（可能与 N 不同）
+        Tq = Nq // Bq
+        Tk = Nk // Bk
 
-            Ob = torch.zeros_like(Qb)
-            Lb = torch.zeros(N, device=Q.device, dtype=Q.dtype)
+        for i in range(Tq):
+            q_lo, q_hi = i * Bq, (i + 1) * Bq
+            Qi = Q_[:, q_lo:q_hi, :]  # (B, Bq, d)
 
-            for i in range(0, N, Br):
-                Qi = Qb[i:i+Br]
-                Br_cur = Qi.shape[0]
+            O_i = torch.zeros(B, Bq, d, device=Q.device, dtype=Q.dtype)
+            l_i = torch.zeros(B, Bq, device=Q.device, dtype=Q.dtype)
+            m_i = torch.full((B, Bq), float('-inf'), device=Q.device, dtype=Q.dtype)
 
-                o_i = torch.zeros_like(Qi)
-                l_i = torch.zeros(Br_cur, device=Q.device, dtype=Q.dtype)
-                m_i = torch.full((Br_cur,), -float('inf'), device=Q.device, dtype=Q.dtype)
+            for j in range(Tk):
+                k_lo, k_hi = j * Bk, (j + 1) * Bk
+                Kj = K_[:, k_lo:k_hi, :]  # (B, Bk, d)
+                Vj = V_[:, k_lo:k_hi, :]  # (B, Bk, d)
 
-                for j in range(0, M, Bc):
-                    Kj = Kb[j:j+Bc]
-                    Vj = Vb[j:j+Bc]
+                # 公式4: S_ij = Q_i K_j^T * scale
+                Sij = torch.einsum('bqd,bkd->bqk', Qi, Kj) * scale  # (B, Bq, Bk)
 
-                    S = torch.matmul(Qi, Kj.T) / (d ** 0.5)
-                    m_ij = S.max(dim=1).values
-                    P = torch.exp(S - m_ij.unsqueeze(1))
-                    l_ij = P.sum(dim=1)
+                # 公式5: 更新行最大值
+                m_ij = Sij.max(dim=-1).values          # (B, Bq)
+                m_new = torch.maximum(m_i, m_ij)        # (B, Bq)
 
-                    m_new = torch.max(m_i, m_ij)
-                    exp_mi = torch.exp(m_i - m_new)
-                    exp_mij = torch.exp(m_ij - m_new)
+                P_ij = torch.exp(Sij - m_new.unsqueeze(-1))  # (B, Bq, Bk)
+                alpha = torch.exp(m_i - m_new)                # (B, Bq)
 
-                    o_i = o_i * exp_mi.unsqueeze(1) + torch.matmul(P, Vj) * exp_mij.unsqueeze(1)
-                    l_i = l_i * exp_mi + l_ij * exp_mij
-                    m_i = m_new
+                # 公式6: 更新 l 和 O（在线 rescale 累积）
+                l_i = alpha * l_i + P_ij.sum(dim=-1)
+                O_i = alpha.unsqueeze(-1) * O_i + torch.einsum('bqk,bkd->bqd', P_ij, Vj)
 
-                Ob_i = o_i / l_i.unsqueeze(1)
-                Lb_i = m_i + torch.log(l_i)
+                m_i = m_new
 
-                Ob[i:i+Br] = Ob_i
-                Lb[i:i+Br] = Lb_i
+            O_i = O_i / l_i.unsqueeze(-1)
+            # 公式12: L_i = m_i + log(l_i)
+            L_i = m_i + torch.log(l_i)
 
-            O_flat[b] = Ob
-            L_flat[b] = Lb
+            O[:, q_lo:q_hi, :] = O_i
+            L[:, q_lo:q_hi] = L_i
 
-        # 恢复输出形状
-        O = O_flat.view(original_shape_Q)
-        # logsumexp 形状：(*batch_dims, N)
-        L = L_flat.view(*batch_dims, N)
+        O = O.reshape(*batch_dims, Nq, d)
+        L = L.reshape(*batch_dims, Nq)
 
-        # 保存用于反向传播
-        ctx.save_for_backward(Q, K, V, O, L)
+        ctx.save_for_backward(L, Q, K, V, O)
+        ctx.is_causal = is_causal
+
         return O
 
+
     @staticmethod
-    def backward(ctx, grad_output):
-        raise NotImplementedError("FlashAttention 反向传播尚未实现")
+    def backward(ctx, grad_out: torch.Tensor):
+        L, Q, K, V, O = ctx.saved_tensors
+        is_causal = ctx.is_causal
+
+        d = Q.shape[-1]
+        scale = 1.0 / math.sqrt(d)
+
+        # 重新计算 S = QK^T * scale   (B..., Nq, Nk)
+        S = torch.einsum('...qd,...kd->...qk', Q, K) * scale
+
+        if is_causal:
+            Nq, Nk = S.shape[-2], S.shape[-1]
+            causal_mask = torch.triu(
+                torch.ones(Nq, Nk, device=S.device, dtype=torch.bool), diagonal=1
+            )
+            S = S.masked_fill(causal_mask, float('-inf'))
+
+        # 用保存的 L 直接还原归一化后的概率矩阵 P = exp(S - L)
+        # 这正是公式 12 的逆用：L_i = m_i + log(l_i)，
+        # 所以 exp(S_ij - L_i) = exp(S_ij - m_i) / l_i = 归一化的 softmax 权重
+        P = torch.exp(S - L.unsqueeze(-1))  # (B..., Nq, Nk)
+
+        # dV = P^T @ dO
+        dV = torch.einsum('...qk,...qd->...kd', P, grad_out)
+
+        # dP = dO @ V^T
+        dP = torch.einsum('...qd,...kd->...qk', grad_out, V)
+
+        # D_i = rowsum(dO_i * O_i)，即对每个 query 行求 dO 与 O 的内积
+        D = (grad_out * O).sum(dim=-1, keepdim=True)  # (B..., Nq, 1)
+
+        # dS_ij = P_ij * (dP_ij - D_i)
+        dS = P * (dP - D)
+
+        if is_causal:
+            dS = dS.masked_fill(causal_mask, 0.0)
+
+        # dQ = dS @ K * scale
+        dQ = torch.einsum('...qk,...kd->...qd', dS, K) * scale
+
+        # dK = dS^T @ Q * scale
+        dK = torch.einsum('...qk,...qd->...kd', dS, Q) * scale
+
+        return dQ, dK, dV, None
