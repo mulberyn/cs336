@@ -415,37 +415,42 @@ class FlashAttentionTriton(torch.autograd.Function):
         scale = 1.0 / math.sqrt(d)
 
         assert Q.is_cuda and K.is_cuda and V.is_cuda, "Triton kernel requires CUDA tensors"
+        
+        def pick_tile(n):
+            for cand in (128, 64, 32, 16):
+                if n % cand == 0:
+                    return cand
+            return 16
+
+        Bq = pick_tile(Nq)
+        Bk = pick_tile(Nk)
 
         # flatten 所有 batch 维度
         Q_ = Q.reshape(-1, Nq, d).contiguous()
-        K = K.reshape(-1, Nk, d).contiguous()
-        V = V.reshape(-1, Nk, d).contiguous()
+        K_ = K.reshape(-1, Nk, d).contiguous()
+        V_ = V.reshape(-1, Nk, d).contiguous()
         B = Q_.shape[0]
 
         O = torch.empty_like(Q_)
         L = torch.empty(B, Nq, device=Q.device, dtype=Q.float32)
-
-        # tile 大小：至少 16x16，可根据 d 调整
-        Q_TILE_SIZE = 64 if Nq % 64 == 0 else (32 if Nq % 32 == 0 else 16)
-        KTILE_SIZE = 64 if Nk % 64 == 0 else (32 if Nk % 32 == 0 else 16)
-
-        Tq = triton.cdiv(Nq, Q_TILE_SIZE)
+        
+        Tq = Nq // Bq
 
         grid = (Tq, B)
 
         flash_fwd_kernel[grid](
-            Q_, K, V,
+            Q_, K_, V_,
             O, L,
             Q_.stride(0), Q_.stride(1), Q_.stride(2),
-            K.stride(0), K.stride(1), K.stride(2),
-            V.stride(0), V.stride(1), V.stride(2),
+            K_.stride(0), K_.stride(1), K_.stride(2),
+            V_.stride(0), V_.stride(1), V_.stride(2),
             O.stride(0), O.stride(1), O.stride(2),
             L.stride(0), L.stride(1),
             Nq, Nk,
             scale,
             D=d,
-            Q_TILE_SIZE=Q_TILE_SIZE,
-            KTILE_SIZE=KTILE_SIZE,
+            Q_TILE_SIZE=Bq,
+            KTILE_SIZE=Bk,
             is_causal=is_causal,
         )
 
@@ -457,7 +462,7 @@ class FlashAttentionTriton(torch.autograd.Function):
 
         return O
 
-    staticmethod
+    @staticmethod
     def backward(ctx, grad_out: torch.Tensor):
         L, Q, K, V, O = ctx.saved_tensors
         is_causal = ctx.is_causal
@@ -467,66 +472,72 @@ class FlashAttentionTriton(torch.autograd.Function):
         scale = 1.0 / math.sqrt(d)
 
         Q_ = Q.reshape(-1, Nq, d).contiguous()
-        K = K.reshape(-1, Nk, d).contiguous()
-        V = V.reshape(-1, Nk, d).contiguous()
-        O = O.reshape(-1, Nq, d).contiguous()
-        L = L.reshape(-1, Nq).contiguous()
-        dO = grad_out.reshape(-1, Nq, d).contiguous()
+        K_ = K.reshape(-1, Nk, d).contiguous()
+        V_ = V.reshape(-1, Nk, d).contiguous()
+        O_ = O.reshape(-1, Nq, d).contiguous()
+        L_ = L.reshape(-1, Nq).contiguous()
+        dO_ = grad_out.reshape(-1, Nq, d).contiguous()
         B = Q_.shape[0]
 
         # D_i = rowsum(dOi * Oi)，逐元素计算，很便宜，直接用 PyTorch
-        D_ = (dO * O).sum(dim=-1).contiguous()  # (B, Nq)
+        D_ = (dO_ * O_).sum(dim=-1).contiguous()  # (B, Nq)
 
-        dQ_ = torch.zeros_like(Q_)
-        dK = torch.zeros_like(K)
-        dV = torch.zeros_like(V)
+        dQ = torch.zeros_like(Q_)
+        dK = torch.zeros_like(K_)
+        dV = torch.zeros_like(V_)
 
-        Q_TILE_SIZE = 64 if Nq % 64 == 0 else (32 if Nq % 32 == 0 else 16)
-        KTILE_SIZE = 64 if Nk % 64 == 0 else (32 if Nk % 32 == 0 else 16)
+        def pick_tile(n):
+            for cand in (128, 64, 32, 16):
+                if n % cand == 0:
+                    return cand
+            return 16
 
-        Tq = triton.cdiv(Nq, Q_TILE_SIZE)
-        Tk = triton.cdiv(Nk, KTILE_SIZE)
+        Bq = pick_tile(Nq)
+        Bk = pick_tile(Nk)
+        
+        Tq = Nq // Bq
+        Tk = Nk // Bk
 
         # kernel 1: 计算 dK, dV，grid = (Tk, B)
         flash_bwd_dkdVkernel[(Tk, B)](
-            Q_, K, V, dO, L, D_,
+            Q_, K_, V_, dO_, L_, D_,
             dK, dV,
             Q_.stride(0), Q_.stride(1), Q_.stride(2),
-            K.stride(0), K.stride(1), K.stride(2),
-            V.stride(0), V.stride(1), V.stride(2),
-            dO.stride(0), dO.stride(1), dO.stride(2),
-            L.stride(0), L.stride(1),
+            K_.stride(0), K_.stride(1), K_.stride(2),
+            V_.stride(0), V_.stride(1), V_.stride(2),
+            dO_.stride(0), dO_.stride(1), dO_.stride(2),
+            L_.stride(0), L_.stride(1),
             D_.stride(0), D_.stride(1),
             dK.stride(0), dK.stride(1), dK.stride(2),
             dV.stride(0), dV.stride(1), dV.stride(2),
             Nq, Nk,
             scale,
             D_MODEL=d,
-            Q_TILE_SIZE=Q_TILE_SIZE,
-            KTILE_SIZE=KTILE_SIZE,
+            Q_TILE_SIZE=Bq,
+            KTILE_SIZE=Bk,
             is_causal=is_causal,
         )
 
         # kernel 2: 计算 dQ，grid = (Tq, B)
         flash_bwd_dQ_kernel[(Tq, B)](
-            Q_, K, V, dO, L, D_,
-            dQ_,
+            Q_, K_, V_, dO_, L_, D_,
+            dQ,
             Q_.stride(0), Q_.stride(1), Q_.stride(2),
-            K.stride(0), K.stride(1), K.stride(2),
-            V.stride(0), V.stride(1), V.stride(2),
-            dO.stride(0), dO.stride(1), dO.stride(2),
-            L.stride(0), L.stride(1),
+            K_.stride(0), K_.stride(1), K_.stride(2),
+            V_.stride(0), V_.stride(1), V_.stride(2),
+            dO_.stride(0), dO_.stride(1), dO_.stride(2),
+            L_.stride(0), L_.stride(1),
             D_.stride(0), D_.stride(1),
-            dQ_.stride(0), dQ_.stride(1), dQ_.stride(2),
+            dQ.stride(0), dQ.stride(1), dQ.stride(2),
             Nq, Nk,
             scale,
             D_MODEL=d,
-            Q_TILE_SIZE=Q_TILE_SIZE,
-            KTILE_SIZE=KTILE_SIZE,
+            Q_TILE_SIZE=Bq,
+            KTILE_SIZE=Bk,
             is_causal=is_causal,
         )
 
-        dQ = dQ_.reshape(*batch_dims, Nq, d)
+        dQ = dQ.reshape(*batch_dims, Nq, d)
         dK = dK.reshape(*batch_dims, Nk, d)
         dV = dV.reshape(*batch_dims, Nk, d)
 
