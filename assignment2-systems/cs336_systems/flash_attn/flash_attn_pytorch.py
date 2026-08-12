@@ -14,7 +14,6 @@ class FlashAttentionPytorch(torch.autograd.Function):
         Nk = K.shape[-2]
         scale = 1.0 / math.sqrt(d)
 
-        # 选择 tile 大小，至少 16x16，且能整除序列长度（题目保证是2的幂且>=16）
         def pick_tile(n):
             for cand in (128, 64, 32, 16):
                 if n % cand == 0:
@@ -24,7 +23,6 @@ class FlashAttentionPytorch(torch.autograd.Function):
         Bq = pick_tile(Nq)
         Bk = pick_tile(Nk)
 
-        # 把所有 batch 维度 flatten 成一维，方便循环处理
         Q_ = Q.reshape(-1, Nq, d)
         K_ = K.reshape(-1, Nk, d)
         V_ = V.reshape(-1, Nk, d)
@@ -36,6 +34,8 @@ class FlashAttentionPytorch(torch.autograd.Function):
         Tq = Nq // Bq
         Tk = Nk // Bk
 
+        neg_inf = torch.finfo(Q.dtype).min
+
         for i in range(Tq):
             q_lo, q_hi = i * Bq, (i + 1) * Bq
             Qi = Q_[:, q_lo:q_hi, :]  # (B, Bq, d)
@@ -44,13 +44,26 @@ class FlashAttentionPytorch(torch.autograd.Function):
             l_i = torch.zeros(B, Bq, device=Q.device, dtype=Q.dtype)
             m_i = torch.full((B, Bq), float('-inf'), device=Q.device, dtype=Q.dtype)
 
-            for j in range(Tk):
+            # causal 情况下，当前 query tile 只需要看到 key 索引 <= q_hi-1 的 K-tile
+            # 即 k_lo <= q_hi - 1  =>  j 的上限
+            max_j = Tk if not is_causal else min(Tk, (q_hi + Bk - 1) // Bk)
+
+            for j in range(max_j):
                 k_lo, k_hi = j * Bk, (j + 1) * Bk
                 Kj = K_[:, k_lo:k_hi, :]  # (B, Bk, d)
                 Vj = V_[:, k_lo:k_hi, :]  # (B, Bk, d)
 
                 # 公式4: S_ij = Q_i K_j^T * scale
                 Sij = torch.einsum('bqd,bkd->bqk', Qi, Kj) * scale  # (B, Bq, Bk)
+
+                if is_causal:
+                    # 该 tile 是否完全在对角线内（无需 mask）：q_lo >= k_hi - 1
+                    fully_unmasked = q_lo >= k_hi - 1
+                    if not fully_unmasked:
+                        q_idx = torch.arange(q_lo, q_hi, device=Q.device).unsqueeze(-1)  # (Bq, 1)
+                        k_idx = torch.arange(k_lo, k_hi, device=Q.device).unsqueeze(0)   # (1, Bk)
+                        causal_mask = k_idx > q_idx  # (Bq, Bk), True 表示需要屏蔽
+                        Sij = Sij.masked_fill(causal_mask, neg_inf)
 
                 # 公式5: 更新行最大值
                 m_ij = Sij.max(dim=-1).values          # (B, Bq)
@@ -64,7 +77,7 @@ class FlashAttentionPytorch(torch.autograd.Function):
                 O_i = alpha.unsqueeze(-1) * O_i + torch.einsum('bqk,bkd->bqd', P_ij, Vj)
 
                 m_i = m_new
-
+                       
             O_i = O_i / l_i.unsqueeze(-1)
             # 公式12: L_i = m_i + log(l_i)
             L_i = m_i + torch.log(l_i)
