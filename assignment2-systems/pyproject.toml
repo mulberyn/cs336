@@ -31,18 +31,34 @@ module-root = ""
 [tool.uv]
 package = true
 python-preference = "managed"
+# 新增：全局索引策略，从所有索引中取最高兼容版本（解决版本冲突）
+index-strategy = "unsafe-best-match"
 
+# ------------------- 索引定义 -------------------
+# 1. PyPI 镜像（清华源，加速下载）
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"   # 改为清华镜像
+default = true                                     # 设为默认索引
+
+# 2. PyTorch 官方 CUDA 130 索引（仅用于 torch 相关包）
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
+explicit = true                                    # 仅当 sources 中显式指定时才使用
 
+# ------------------- 包来源映射 -------------------
 [tool.uv.sources]
-cs336-basics = { path = "./cs336-basics", editable = true } # Change this path to your assignment1-basics repo you want to use your own implementation!
+# 本地开发依赖（请确保路径正确）
+cs336-basics = { path = "./cs336-basics", editable = true }
+# 指定 torch 系列从 PyTorch 索引安装
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 torchaudio = { index = "pytorch-cu130" }
+# tqdm 明确从 PyPI（清华镜像）获取，避免版本冲突
+tqdm = { index = "pypi" }
 
-
+# ------------------- 测试与 Lint 配置（保持不变） -------------------
 [tool.pytest.ini_options]
 log_cli = true
 log_cli_level = "WARNING"
@@ -57,7 +73,6 @@ filterwarnings = [
 line-length = 180
 
 [tool.ruff.lint.extend-per-file-ignores]
-# Also ignore `E402` in all `__init__.py` files.
 "__init__.py" = ["E402", "F401", "F403", "E501"]
 
 [tool.ruff.lint]

@@ -104,7 +104,7 @@ class FlashAttentionPytorch(torch.autograd.Function):
         scale = 1.0 / math.sqrt(d)
 
         def pick_tile(n):
-            for cand in (128, 64, 32, 16):
+            for cand in (64, 32, 16):
                 if n % cand == 0:
                     return cand
             return 16
