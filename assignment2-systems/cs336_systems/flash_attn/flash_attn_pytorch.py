@@ -15,7 +15,7 @@ class FlashAttentionPytorch(torch.autograd.Function):
         scale = 1.0 / math.sqrt(d)
 
         def pick_tile(n):
-            for cand in (128, 64, 32, 16):
+            for cand in (64, 32, 16):
                 if n % cand == 0:
                     return cand
             return 16
@@ -130,7 +130,7 @@ class FlashAttentionPytorch(torch.autograd.Function):
         # 预计算每行 D_i = rowsum(dO_i * O_i)，(B, Nq)
         D_ = (dO_ * O_).sum(dim=-1)
 
-        # 外层循环 K/V tile（j），内层循环 Q tile（i） —— 对应 Algorithm 2
+        # 外层循环 K/V tile（j），内层循环 Q tile（i）
         for j in range(Tk):
             k_lo, k_hi = j * Bk, (j + 1) * Bk
             Kj = K_[:, k_lo:k_hi, :]   # (B, Bk, d)
@@ -147,7 +147,6 @@ class FlashAttentionPytorch(torch.autograd.Function):
                     continue
 
                 Qi = Q_[:, q_lo:q_hi, :]     # (B, Bq, d)
-                Oi = O_[:, q_lo:q_hi, :]     # (B, Bq, d)  (仅用于对照, D_i已算好)
                 Li = L_[:, q_lo:q_hi]        # (B, Bq)
                 dOi = dO_[:, q_lo:q_hi, :]   # (B, Bq, d)
                 Di = D_[:, q_lo:q_hi]        # (B, Bq)

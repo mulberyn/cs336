@@ -75,7 +75,7 @@ def flash_fwd_kernel(
     # 在线 softmax 累积状态
     m_i = tl.full((Bq,), value=float("-inf"), dtype=tl.float32)
     l_i = tl.zeros((Bq,), dtype=tl.float32)
-    acc = tl.zeros((Bq, D), dtype=tl.float32)
+    O_i = tl.zeros((Bq, D), dtype=tl.float32)
 
     q_start = query_tile_index * Bq
 
@@ -111,7 +111,7 @@ def flash_fwd_kernel(
         Pij = tl.exp(Sij - m_new[:, None])
 
         l_i = alpha * l_i + tl.sum(Pij, axis=1)
-        acc = acc * alpha[:, None] + tl.dot(Pij.to(Vj.dtype), Vj)
+        O_i = O_i * alpha[:, None] + tl.dot(Pij.to(Vj.dtype), Vj)
 
         m_i = m_new
 
@@ -120,10 +120,10 @@ def flash_fwd_kernel(
         V_block_ptr = tl.advance(V_block_ptr, (Bk, 0))
 
     # 归一化
-    acc = acc / l_i[:, None]
+    O_i = O_i / l_i[:, None]
     Li = m_i + tl.log(l_i)
 
-    tl.store(O_block_ptr, acc.to(O_block_ptr.type.element_ty), boundary_check=(0, 1))
+    tl.store(O_block_ptr, O_i.to(O_block_ptr.type.element_ty), boundary_check=(0, 1))
     tl.store(L_block_ptr, Li.to(L_block_ptr.type.element_ty), boundary_check=(0,))
 
 
@@ -188,8 +188,8 @@ def flash_bwd_dkdv_kernel(
     Kj = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero").to(tl.float32)
     Vj = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero").to(tl.float32)
 
-    dKj_acc = tl.zeros((Bk, D_MODEL), dtype=tl.float32)
-    dVj_acc = tl.zeros((Bk, D_MODEL), dtype=tl.float32)
+    dKj = tl.zeros((Bk, D_MODEL), dtype=tl.float32)
+    dVj = tl.zeros((Bk, D_MODEL), dtype=tl.float32)
 
     # Q, dO, L, D 的 block pointer，从第 0 个 query tile 开始，循环中前进
     Q_block_ptr = tl.make_block_ptr(
@@ -258,7 +258,7 @@ def flash_bwd_dkdv_kernel(
         Pij = tl.exp(Sij - Li[:, None])  # (Bq, Bk)
 
         # dV_j += P_ij^T @ dO_i
-        dVj_acc += tl.dot(tl.trans(Pij), dOi)
+        dVj += tl.dot(tl.trans(Pij), dOi)
 
         # dP_ij = dO_i @ V_j^T
         dPij = tl.dot(dOi, tl.trans(Vj))
@@ -270,7 +270,7 @@ def flash_bwd_dkdv_kernel(
             dSij = tl.where(causal_mask, dSij, 0.0)
 
         # dK_j += dS_ij^T @ Q_i * scale
-        dKj_acc += tl.dot(tl.trans(dSij), Qi) * scale
+        dKj += tl.dot(tl.trans(dSij), Qi) * scale
 
         # 循环末尾前进 block pointer
         Q_block_ptr = tl.advance(Q_block_ptr, (Bq, 0))
@@ -278,8 +278,8 @@ def flash_bwd_dkdv_kernel(
         L_block_ptr = tl.advance(L_block_ptr, (Bq,))
         D_block_ptr = tl.advance(D_block_ptr, (Bq,))
 
-    tl.store(dK_block_ptr, dKj_acc.to(dK_block_ptr.type.element_ty), boundary_check=(0, 1))
-    tl.store(dV_block_ptr, dVj_acc.to(dV_block_ptr.type.element_ty), boundary_check=(0, 1))
+    tl.store(dK_block_ptr, dKj.to(dK_block_ptr.type.element_ty), boundary_check=(0, 1))
+    tl.store(dV_block_ptr, dVj.to(dV_block_ptr.type.element_ty), boundary_check=(0, 1))
 
 
 @triton.jit
@@ -352,7 +352,7 @@ def flash_bwd_dq_kernel(
     Li = tl.load(L_block_ptr, boundary_check=(0,), padding_option="zero").to(tl.float32)
     Di = tl.load(D_block_ptr, boundary_check=(0,), padding_option="zero").to(tl.float32)
 
-    dQi_acc = tl.zeros((Bq, D_MODEL), dtype=tl.float32)
+    dQi = tl.zeros((Bq, D_MODEL), dtype=tl.float32)
 
     K_block_ptr = tl.make_block_ptr(
         K_ptr + batch_index * stride_kb,
@@ -399,12 +399,12 @@ def flash_bwd_dq_kernel(
             dSij = tl.where(causal_mask, dSij, 0.0)
 
         # dQ_i += dS_ij @ K_j * scale
-        dQi_acc += tl.dot(dSij, Kj) * scale
+        dQi += tl.dot(dSij, Kj) * scale
 
         K_block_ptr = tl.advance(K_block_ptr, (Bk, 0))
         V_block_ptr = tl.advance(V_block_ptr, (Bk, 0))
 
-    tl.store(dQ_block_ptr, dQi_acc.to(dQ_block_ptr.type.element_ty), boundary_check=(0, 1))
+    tl.store(dQ_block_ptr, dQi.to(dQ_block_ptr.type.element_ty), boundary_check=(0, 1))
 
 
 class FlashAttentionTriton(torch.autograd.Function):
