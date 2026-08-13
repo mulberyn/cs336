@@ -407,6 +407,88 @@ def flash_bwd_dq_kernel(
     tl.store(dQ_block_ptr, dQi.to(dQ_block_ptr.type.element_ty), boundary_check=(0, 1))
 
 
+import functools
+
+@functools.lru_cache(maxsize=1)
+def _get_shared_mem_limit(device_index: int = 0) -> int:
+    """
+    查询当前 GPU 每个 SM/block 可用的 shared memory 上限（字节）。
+    不同架构该字段名称略有不同，做个兼容性兜底。
+    """
+    props = torch.cuda.get_device_properties(device_index)
+    # 大多数新架构（Ampere 及以后）用 shared_memory_per_block_optin
+    # 表示 opt-in 后单个 block 能申请到的最大 shared memory
+    limit = getattr(props, "shared_memory_per_block_optin", None)
+    if limit is None or limit == 0:
+        # 退化到标准字段
+        limit = getattr(props, "shared_memory_per_block", None)
+    if limit is None or limit == 0:
+        # 最保守兜底：绝大多数卡至少有 48KB
+        limit = 48 * 1024
+    return int(limit)
+
+
+def pick_tile_sizes(
+    seq_len_q: int,
+    seq_len_k: int,
+    d_model: int,
+    dtype: torch.dtype,
+    device_index: int = 0,
+    num_extra_buffers: int = 1,  # S矩阵之外，是否还需额外的中间buffer（backward比forward更吃shared mem）
+    safety_margin: float = 0.75,
+) -> tuple[int, int]:
+    """
+    根据 (d_model, dtype) 以及硬件 shared memory 上限，
+    自适应选择 Bq, Bk，保证 kernel 编译时不会因为 shared memory 溢出而失败。
+
+    估算的 shared memory 占用（粗略，够用于选 tile size，不追求和 triton 编译器完全一致）：
+        Q_tile: Bq * d_model
+        K_tile: Bk * d_model
+        V_tile: Bk * d_model
+        S/P矩阵: Bq * Bk
+        (backward 额外还有 dO/dQ/dK/dV 等 tile，用 num_extra_buffers 粗略放大)
+    """
+    bytes_per_elem = 2 if dtype in (torch.bfloat16, torch.float16) else 4
+    shared_mem_limit = _get_shared_mem_limit(device_index)
+    budget = shared_mem_limit * safety_margin
+
+    candidates = [128, 64, 32, 16]
+
+    def estimate_bytes(Bq, Bk):
+        base = (Bq * d_model + 2 * Bk * d_model + Bq * Bk) * bytes_per_elem
+        return base * num_extra_buffers
+
+    # 优先尝试 Bq == Bk == B（对称，简单），从大到小找第一个满足显存预算、
+    # 且能整除对应序列长度的 tile size
+    for B in candidates:
+        Bq_try = B if seq_len_q % B == 0 else None
+        Bk_try = B if seq_len_k % B == 0 else None
+        if Bq_try is None or Bk_try is None:
+            continue
+        if estimate_bytes(Bq_try, Bk_try) <= budget:
+            return Bq_try, Bk_try
+
+    # 对称找不到就分别为 Bq, Bk 单独退化（比如 d_model 很大时，
+    # 可以让 Bk 更小、Bq 保持大一点，反之亦然），做一次更细的搜索
+    best = None
+    for Bq in candidates:
+        if seq_len_q % Bq != 0:
+            continue
+        for Bk in candidates:
+            if seq_len_k % Bk != 0:
+                continue
+            if estimate_bytes(Bq, Bk) <= budget:
+                score = Bq * Bk  # 越大越好（并行效率通常更高）
+                if best is None or score > best[0]:
+                    best = (score, Bq, Bk)
+
+    if best is not None:
+        return best[1], best[2]
+
+    # 最终兜底：全部退化到 16x16（题目保证 seq_len 是 2 的幂且 >=16，一定能整除）
+    return 16, 16
+
+
 class FlashAttentionTriton(torch.autograd.Function):
     @staticmethod
     def forward(ctx, Q, K, V, is_causal=False):
@@ -416,14 +498,10 @@ class FlashAttentionTriton(torch.autograd.Function):
 
         assert Q.is_cuda and K.is_cuda and V.is_cuda, "Triton kernel requires CUDA tensors"
         
-        def pick_tile(n):
-            for cand in (64, 32, 16):
-                if n % cand == 0:
-                    return cand
-            return 16
-
-        Bq = pick_tile(Nq)
-        Bk = pick_tile(Nk)
+        device_index = Q.device.index if Q.device.index is not None else 0
+        Bq, Bk = pick_tile_sizes(
+            Nq, Nk, d, Q.dtype, device_index=device_index, num_extra_buffers=3
+        )
 
         # flatten 所有 batch 维度
         Q_ = Q.reshape(-1, Nq, d).contiguous()
@@ -486,14 +564,10 @@ class FlashAttentionTriton(torch.autograd.Function):
         dK_ = torch.zeros_like(K_)
         dV_ = torch.zeros_like(V_)
 
-        def pick_tile(n):
-            for cand in (64, 32, 16):
-                if n % cand == 0:
-                    return cand
-            return 16
-
-        Bq = pick_tile(Nq)
-        Bk = pick_tile(Nk)
+        device_index = Q.device.index if Q.device.index is not None else 0
+        Bq, Bk = pick_tile_sizes(
+            Nq, Nk, d, Q.dtype, device_index=device_index, num_extra_buffers=3
+        )
 
         Tq = triton.cdiv(Nq, Bq)
         Tk = triton.cdiv(Nk, Bk)
