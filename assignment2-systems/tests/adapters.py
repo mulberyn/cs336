@@ -70,8 +70,17 @@ def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Opt
     """
     # For example: ddp_model.finish_gradient_synchronization()
     from cs336_systems.distributed import NaiveDDP
-    if hasattr(ddp_model, 'finish_gradient_synchronization'):
-        ddp_model.finish_gradient_synchronization()
+    import torch
+    import torch.distributed as dist
+    
+    world_size = dist.get_world_size()
+
+    for p in ddp_model.parameters():
+        if p.grad is None:
+            continue
+
+        dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
+        p.grad.div_(world_size)
 
 
 def get_fsdp(module: torch.nn.Module, compute_dtype: torch.dtype | None = None) -> torch.nn.Module:
