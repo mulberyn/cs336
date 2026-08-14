@@ -53,7 +53,8 @@ def get_ddp(module: torch.nn.Module) -> torch.nn.Module:
         Instance of a DDP class.
     """
     # For example: return DDP(module)
-    raise NotImplementedError
+    from cs336_systems.distributed import DDP
+    return DDP(module)
 
 
 def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -68,7 +69,12 @@ def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Opt
             Optimizer being used with the DDP-wrapped model.
     """
     # For example: ddp_model.finish_gradient_synchronization()
-    raise NotImplementedError
+    from cs336_systems.distributed import DDP
+    if hasattr(ddp_model, 'finish_gradient_synchronization'):
+        ddp_model.finish_gradient_synchronization()
+    else:
+        # 如果模型未被正确包装，可忽略或抛出警告
+        pass
 
 
 def get_fsdp(module: torch.nn.Module, compute_dtype: torch.dtype | None = None) -> torch.nn.Module:
