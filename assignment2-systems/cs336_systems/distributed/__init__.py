@@ -1,1 +1,1 @@
-from .ddp import NaiveDDP
+from .ddp import NaiveDDP, DDP

@@ -53,8 +53,8 @@ def get_ddp(module: torch.nn.Module) -> torch.nn.Module:
         Instance of a DDP class.
     """
     # For example: return DDP(module)
-    from cs336_systems.distributed import NaiveDDP
-    return NaiveDDP(module)
+    from cs336_systems.distributed import DDP
+    return DDP(module)
 
 
 def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):
@@ -69,18 +69,7 @@ def ddp_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Opt
             Optimizer being used with the DDP-wrapped model.
     """
     # For example: ddp_model.finish_gradient_synchronization()
-    from cs336_systems.distributed import NaiveDDP
-    import torch
-    import torch.distributed as dist
-    
-    world_size = dist.get_world_size()
-
-    for p in ddp_model.parameters():
-        if p.grad is None:
-            continue
-
-        dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
-        p.grad.div_(world_size)
+    ddp_model.finish_gradient_synchronization()
 
 
 def get_fsdp(module: torch.nn.Module, compute_dtype: torch.dtype | None = None) -> torch.nn.Module:
