@@ -3,6 +3,7 @@ from typing import Any
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+
 try:
     from cs336_basics.model import Linear as CS336Linear
     from cs336_basics.model import Embedding as CS336Embedding
@@ -15,6 +16,7 @@ _SHARDED_TYPES = (
     CS336Linear,
     CS336Embedding,
 )
+
 class FSDP(nn.Module):
     """
     A simplified Fully Sharded Data Parallel implementation.
@@ -76,6 +78,7 @@ class FSDP(nn.Module):
                 continue
             if id(p) in self._sharded_params:
                 continue
+            # 这个参数 backward 产生 gradient 后，自动进行 all-reduce。
             p.register_post_accumulate_grad_hook(
                 self._make_replicated_grad_hook()
             )
@@ -88,26 +91,17 @@ class FSDP(nn.Module):
         if original_weight.ndim == 0:
             return
         num_rows = original_shape[0]
-        # We shard dimension 0.
-        #
-        # For example:
-        #
-        # 128 rows, world_size=2
-        #
-        # rank0 -> 64 rows
-        # rank1 -> 64 rows
-        #
         local_rows = (num_rows + self.world_size - 1) // self.world_size
         padded_rows = local_rows * self.world_size
         # Master weights stay FP32.
         full_weight = original_weight.data.to(torch.float32)
         # Pad if the first dimension is not divisible by world_size.
-        if padded_rows != num_rows:
+        if padded_rows != num_rows: #有行空出来了
             padded_shape = (
                 padded_rows,
                 *original_shape[1:],
             )
-            padded_weight = torch.zeros(
+            padded_weight = torch.zeros( # 先全初始化为 0
                 padded_shape,
                 dtype=full_weight.dtype,
                 device=full_weight.device,
@@ -174,9 +168,6 @@ class FSDP(nn.Module):
             )
             metadata = self._sharded_params[id(local_param)]
             num_rows = metadata["num_rows"]
-            # Keep the padded tensor as the leaf Parameter.
-            #
-            # We only use the valid rows for the actual computation.
             full_weight = nn.Parameter(
                 full_padded,
                 requires_grad=True,
