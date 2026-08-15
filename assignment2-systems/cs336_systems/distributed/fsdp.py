@@ -243,6 +243,7 @@ class FSDP(nn.Module):
                     )
                 )
             else:
+                # 当前 full_grad 是根据完整的参数和部分批次数据得到的
                 chunks = list(
                     full_grad.chunk(
                         self.world_size,
@@ -300,9 +301,7 @@ class FSDP(nn.Module):
             if kind == "replicated":
                 _, handle, param = item
                 handle.wait()
-                param.grad.div_(
-                    self.world_size
-                )
+                param.grad.div_(self.world_size)
             # --------------------------------------------------------------
             # Sharded parameter, Gloo fallback
             # --------------------------------------------------------------
@@ -315,9 +314,7 @@ class FSDP(nn.Module):
                     metadata,
                 ) = item
                 handle.wait()
-                full_grad.div_(
-                    self.world_size
-                )
+                full_grad.div_(self.world_size)
                 local_rows = metadata["local_rows"]
                 start = self.rank * local_rows
                 end = start + local_rows
@@ -345,12 +342,8 @@ class FSDP(nn.Module):
                     metadata,
                 ) = item
                 handle.wait()
-                local_grad.div_(
-                    self.world_size
-                )
-                local_grad = local_grad.to(
-                    local_param.dtype
-                )
+                local_grad.div_(self.world_size)
+                local_grad = local_grad.to(local_param.dtype)
                 if local_param.grad is None:
                     local_param.grad = local_grad.clone()
                 else:
