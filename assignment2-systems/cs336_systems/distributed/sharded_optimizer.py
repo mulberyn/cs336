@@ -17,6 +17,7 @@ class ShardedOptimizer(Optimizer):
         self.optimizer_kwargs = kwargs
         self.wrapped_optimizer = None
         super().__init__(params, {})
+    
 
     def add_param_group(self, param_group):
         super().add_param_group(param_group)
@@ -33,6 +34,7 @@ class ShardedOptimizer(Optimizer):
             )
         else:
             self.wrapped_optimizer.add_param_group(local_group)
+    
 
     def step(self, closure=None, **kwargs):
         loss = self.wrapped_optimizer.step(

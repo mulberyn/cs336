@@ -14,7 +14,8 @@ class NaiveDDP(torch.nn.Module):
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
-class DDP(torch.nn.Module):
+
+class OverlapDDP(torch.nn.Module):
     def __init__(self, module):
         super().__init__()
         self.module = module
